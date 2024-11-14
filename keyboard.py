@@ -60,14 +60,16 @@ after_start_kb = ReplyKeyboardMarkup(
 after_start_admin_kb = ReplyKeyboardMarkup(
     keyboard=[
         [
+            KeyboardButton(text="Записать клиента"),
+            KeyboardButton(text="Зарегистрировать клиента")
+        ],
+        [
             KeyboardButton(text="Редакатировать профиль")
         ],
+
         [
-            KeyboardButton(text="Записать клиента"),
+            KeyboardButton(text="Наши контакты"),
             KeyboardButton(text="Помощь")
-        ],
-        [
-            KeyboardButton(text="Наши контакты")
         ]
     ],
     resize_keyboard=True,
