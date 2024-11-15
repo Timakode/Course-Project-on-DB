@@ -3,12 +3,14 @@ import asyncio
 from aiogram import Bot, Dispatcher, types, Router, F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, InputFile, FSInputFile
 from aiogram.filters import CommandStart, Command, state
+
+import db
 import keyboard
 from decouple import config
-from db import get_user_by_id, add_user, get_user_by_phone
+from db import *
 import re
 from aiogram.fsm.context import FSMContext
-from utils.states import UserData, UserDataforAdmin
+from utils.states import UserData, UserDataforAdmin, EditProfile
 from aiogram.utils.markdown import hlink
 
 
@@ -116,7 +118,7 @@ async def form_name(message: Message, state: FSMContext):
 
 
 @router.message(F.text.lower() == "зарегистрировать клиента")
-async def registration_admin(message: Message, state: FSMContext) -> None:
+async def registration_admin(message: Message, state: FSMContext):
     # Начало регистрации клиента
     await message.answer("Пожалуйста, введите номер телефона Клиента в формате +79491234567")
     await state.set_state(UserDataforAdmin.phone)
@@ -164,6 +166,64 @@ async def form_name_admin(message: Message, state: FSMContext):
     await message.answer(f"Поздравляю, регистрация Клиента прошла успешно!",
                         reply_markup=keyboard.after_start_admin_kb)
 
+
+@router.message(F.text.lower() == "редактировать профиль")
+async def editProfile(message: Message, state: FSMContext):
+    await message.answer(f"Что Вы хотите изменить?", reply_markup=keyboard.edit_kb)
+    await state.set_state(EditProfile.start)
+
+
+@router.message(EditProfile.start)
+async def editorStart(message: Message, state: FSMContext):
+    if message.text.lower() == "изменить номер телефона":
+        await state.set_state(EditProfile.phone)
+        await message.answer("Введите новый номер телефона:", reply_markup=None)
+    elif message.text.lower() == "добавить авто":
+        await state.set_state(EditProfile.addAuto)
+        await message.answer("Введите марку авто: ", reply_markup=None)
+    elif message.text.lower() == "редактировать авто":
+        await state.set_state(EditProfile.addAuto)
+        await message.answer("РЕДАКТИРОВАНИЕ АВТО: ", reply_markup=None)
+    elif message.text.lower() == "назад":
+        await state.clear()
+        telegram_id = message.from_user.id
+        if telegram_id in admin_ids:
+            await message.answer(f"Вы вернулись в главное меню",
+                                 reply_markup=keyboard.after_start_admin_kb)
+        else:
+            await message.answer(f"Вы вернулись в главное меню",
+                                 reply_markup=keyboard.after_start_kb)
+
+@router.message(EditProfile.phone)
+async def editPhone(message: Message, state: FSMContext):
+    # Проверка формата номера телефона (например, +71234567890)
+    phone_pattern = re.compile(r"^\+?\d{11,15}$")
+    phone_number = message.text
+
+    telegram_id = message.from_user.id
+    user = await get_user_by_id(telegram_id)
+    if user is None:
+        await message.answer("Пользователь не найден в базе данных.")
+        return
+    old_phone_number = user.get("phone_number")
+
+    if phone_pattern.match(phone_number):
+        await state.update_data(phone=phone_number)
+        data = await state.get_data()
+        phone_number = data.get("phone")
+        await db.update_phone(old_phone_number, phone_number)
+
+        if telegram_id in admin_ids:
+            await message.answer(f"Номер телефона успешно обновлен. Новый номер: {phone_number}",
+                                 reply_markup=keyboard.after_start_admin_kb)
+        else:
+            await message.answer(f"Номер телефона успешно обновлен. Новый номер: {phone_number}",
+                                 reply_markup=keyboard.after_start_kb)
+
+        await state.clear()
+    else:
+        await message.answer("Номер телефона введен неверно, попробуйте ещё раз")
+        await editPhone(message, state)
 
 
 @router.message(F.text.lower() == "наши контакты")

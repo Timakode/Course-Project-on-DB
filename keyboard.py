@@ -41,7 +41,7 @@ after_start_kb = ReplyKeyboardMarkup(
           KeyboardButton(text="Запись")
         ],
         [
-            KeyboardButton(text="Редакатировать профиль"),
+            KeyboardButton(text="Редактировать профиль"),
             KeyboardButton(text="Мои авто")
         ],
         [
@@ -64,12 +64,31 @@ after_start_admin_kb = ReplyKeyboardMarkup(
             KeyboardButton(text="Зарегистрировать клиента")
         ],
         [
-            KeyboardButton(text="Редакатировать профиль")
+            KeyboardButton(text="Редактировать профиль"),
+            KeyboardButton(text="Редактировать профиль клиента")
         ],
-
         [
             KeyboardButton(text="Наши контакты"),
             KeyboardButton(text="Помощь")
+        ]
+    ],
+    resize_keyboard=True,
+    input_field_placeholder="Выберите пункт меню",
+    selective=True
+)
+
+
+edit_kb = ReplyKeyboardMarkup(
+    keyboard=[
+        [
+            KeyboardButton(text="Изменить номер телефона"),
+        ],
+        [
+            KeyboardButton(text="Добавить авто"),
+            KeyboardButton(text="Редактировать авто")
+        ],
+        [
+            KeyboardButton(text="Назад")
         ]
     ],
     resize_keyboard=True,

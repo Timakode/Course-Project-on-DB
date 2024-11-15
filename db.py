@@ -69,3 +69,23 @@ async def get_user_by_id(telegram_id: int):# Функция для получе�
             "phone_number": row[3],
         }
         return user
+
+async def update_phone(old_phone_number: str, new_phone_number: str):
+    async with aiosqlite.connect("users.db") as db:
+        # Проверяем, существует ли новый номер в таблице
+        cursor = await db.execute("""
+        SELECT 1 FROM users WHERE phone_number = ?;
+        """, (new_phone_number,))
+        exists = await cursor.fetchone()
+        await cursor.close()
+
+        if exists:
+            raise ValueError(f"Номер {new_phone_number} уже существует в базе данных.")
+
+        # Выполняем обновление
+        await db.execute("""
+        UPDATE users
+        SET phone_number = ?
+        WHERE phone_number = ?;
+        """, (new_phone_number, old_phone_number))
+        await db.commit()
