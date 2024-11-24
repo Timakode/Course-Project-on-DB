@@ -1,8 +1,11 @@
 import os
 import asyncio
 from aiogram import Bot, Dispatcher, types, Router, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, InputFile, FSInputFile
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, InputFile, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import CommandStart, Command, state
+from aiogram.types import CallbackQuery
+from aiogram.filters.callback_data import CallbackData
+from aiogram.filters.state import StateFilter
 
 import db
 import keyboard
@@ -23,6 +26,8 @@ phone_number = None
 async def start_command(message:Message) -> None:
     telegram_id = message.from_user.id
     user_data = await get_user_by_id(telegram_id)
+    if user_data:
+        user_id = user_data["id"]
 
     if user_data is None:
         if telegram_id in admin_ids:
@@ -106,8 +111,12 @@ async def form_name(message: Message, state: FSMContext):
             first_name=first_name,
             phone_number=phone_number
         )
+
     dbname = await get_user_by_id(telegram_id)
-    db_name = dbname.get("name")
+    if dbname is not None:
+        db_name = dbname.get("name")
+    else:
+        db_name = first_name
 
     if telegram_id in admin_ids:
         await message.answer(f"Поздравляю, {db_name}, регистрация прошла успешно!",
@@ -180,9 +189,9 @@ async def editorStart(message: Message, state: FSMContext):
         await message.answer("Введите новый номер телефона:", reply_markup=None)
     elif message.text.lower() == "добавить авто":
         await state.set_state(EditProfile.addAuto)
-        await message.answer("Введите марку авто: ", reply_markup=None)
+        await message.answer("Введите регистрационный номер авто: ", reply_markup=None)
     elif message.text.lower() == "редактировать авто":
-        await state.set_state(EditProfile.addAuto)
+        await state.set_state(EditProfile.editAuto)
         await message.answer("РЕДАКТИРОВАНИЕ АВТО: ", reply_markup=None)
     elif message.text.lower() == "назад":
         await state.clear()
@@ -196,6 +205,17 @@ async def editorStart(message: Message, state: FSMContext):
 
 @router.message(EditProfile.phone)
 async def editPhone(message: Message, state: FSMContext):
+    if message.text.lower() == "назад":
+        await state.set_state(EditProfile.start)
+        telegram_id = message.from_user.id
+        if telegram_id in admin_ids:
+            await message.answer(f"Вы вернулись в меню редактирования профиля",
+                                 reply_markup=keyboard.edit_kb)
+        else:
+            await message.answer(f"Вы вернулись в меню редактирования профиля",
+                                 reply_markup=keyboard.edit_kb)
+        return
+
     # Проверка формата номера телефона (например, +71234567890)
     phone_pattern = re.compile(r"^\+?\d{11,15}$")
     phone_number = message.text
@@ -224,6 +244,133 @@ async def editPhone(message: Message, state: FSMContext):
     else:
         await message.answer("Номер телефона введен неверно, попробуйте ещё раз")
         await editPhone(message, state)
+
+
+
+@router.message(EditProfile.addAuto)
+async def car_number(message: Message, state: FSMContext):
+    car_number = message.text
+
+    car = await get_car_by_number(car_number)
+    if car is not None:
+        telegram_id = message.from_user.id
+        if telegram_id in admin_ids:
+            await message.answer(f"Такой номер авто уже зарегистрирован",
+                                 reply_markup=keyboard.after_start_admin_kb)
+        else:
+            await message.answer(f"Такой номер авто уже зарегистрирован",
+                                 reply_markup=keyboard.after_start_kb)
+        await state.clear()
+        return
+
+    await state.update_data(car_number=car_number)
+
+    await state.set_state(EditProfile.car_brand)
+    await message.answer("Введите марку авто: ", reply_markup=None)
+
+@router.message(EditProfile.car_brand)
+async def car_brand(message: Message, state: FSMContext):
+    car_brand = message.text
+    await state.update_data(car_brand=car_brand)
+
+    await state.set_state(EditProfile.car_model)
+    await message.answer("Введите модель авто: ", reply_markup=None)
+
+@router.message(EditProfile.car_model)
+async def car_model(message: Message, state: FSMContext):
+    car_model = message.text
+    await state.update_data(car_model=car_model)
+
+    await state.set_state(EditProfile.car_year)
+    await message.answer("Введите год выпуска авто: ", reply_markup=None)
+
+@router.message(EditProfile.car_year)
+async def car_year(message: Message, state: FSMContext):
+    car_year = message.text
+    await state.update_data(car_year=car_year)
+
+    await state.set_state(EditProfile.car_color)
+    await message.answer("Введите цвет авто: ", reply_markup=None)
+
+@router.message(EditProfile.car_color)
+async def car_color(message: Message, state: FSMContext):
+    car_color = message.text
+    await state.update_data(car_color=car_color)
+
+    await state.set_state(EditProfile.wrapped_car)
+    await message.answer(
+        "Выберите, оклеен ли авто пленкой:",
+        reply_markup=keyboard.wrap_car_kb()
+    )
+
+
+
+@router.callback_query(StateFilter(EditProfile.wrapped_car))
+async def wrapped_car_callback(call: CallbackQuery, state: FSMContext):
+    if call.data == "wrap_yes":
+        await state.update_data(wrapped_car="Полностью")
+    elif call.data == "wrap_50":
+        await state.update_data(wrapped_car="Частично")
+    elif call.data == "wrap_no":
+        await state.update_data(wrapped_car="Нет")
+
+    # Переход к следующему состоянию
+    await state.set_state(EditProfile.repainted_car)
+    await call.message.answer(
+        "Есть ли на авто крашеные элементы:",
+        reply_markup=keyboard.repaint_car_kb()
+    )
+    await call.answer()
+
+
+# Обработчик для выбора, есть ли крашеные элементы
+@router.callback_query(StateFilter(EditProfile.repainted_car))
+async def repainted_car_callback(call: CallbackQuery, state: FSMContext):
+    if call.data == "repaint_yes":
+        await state.update_data(repainted_car="Да")
+    elif call.data == "repaint_no":
+        await state.update_data(repainted_car="Нет")
+
+    # Получаем user_id из таблицы users
+    user_id = (await get_user_by_id(call.from_user.id))['id']
+    if user_id is None:
+        await call.message.answer("Ошибка! Пользователь не найден.")
+        return
+
+    # Сохранение данных в базу
+    data = await state.get_data()
+    await state.clear()  # Завершение FSM
+
+    car_number = data.get("car_number")
+    car_brand = data.get("car_brand")
+    car_model = data.get("car_model")
+    car_year = data.get("car_year")
+    car_color = data.get("car_color")
+    wrapped_car = data.get("wrapped_car")
+    repainted_car = data.get("repainted_car")
+
+
+
+    await add_car(
+        car_number=car_number,
+        user_id=user_id,
+        car_brand=car_brand,
+        car_model=car_model,
+        car_year=car_year,
+        car_color=car_color,
+        wrapped_car=wrapped_car,
+        repainted_car=repainted_car
+    )
+
+    # Ответ пользователю
+    telegram_id = call.from_user.id
+    if telegram_id in admin_ids:
+        await call.message.answer("Поздравляю, авто успешно добавлено!",
+                                   reply_markup=keyboard.after_start_admin_kb)
+    else:
+        await call.message.answer("Поздравляю, авто успешно добавлено!",
+                                   reply_markup=keyboard.after_start_kb)
+    await call.answer()
 
 
 @router.message(F.text.lower() == "наши контакты")

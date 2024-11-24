@@ -95,3 +95,27 @@ edit_kb = ReplyKeyboardMarkup(
     input_field_placeholder="Выберите пункт меню",
     selective=True
 )
+
+
+def wrap_car_kb():
+    # Создаём кнопки
+    button_yes = InlineKeyboardButton(text="Да, полностью", callback_data="wrap_yes")
+    button_50 = InlineKeyboardButton(text="Да, частично", callback_data="wrap_50")
+    button_no = InlineKeyboardButton(text="Нет", callback_data="wrap_no")
+    # Создаём клавиатуру
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [button_yes],
+        [button_50],
+        [button_no]
+    ])
+    return keyboard
+
+def repaint_car_kb():
+    # Создаём кнопки
+    button_yes = InlineKeyboardButton(text="Да", callback_data="repaint_yes")
+    button_no = InlineKeyboardButton(text="Нет", callback_data="repaint_no")
+    # Создаём клавиатуру
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [button_yes, button_no]  # Добавляем кнопки в одну строку
+    ])
+    return keyboard
