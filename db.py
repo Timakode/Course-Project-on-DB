@@ -141,3 +141,83 @@ async def get_car_by_number(car_number: str):# Функция для получ�
             "repainted_car": row[7],
         }
         return car
+
+
+async def get_client_and_cars_by_phone(phone_number: str):
+    async with aiosqlite.connect("users.db") as db:
+        query = """
+        SELECT users.id, users.telegram_id, users.username, users.first_name, users.phone_number,
+               cars.car_number, cars.car_brand, cars.car_model, cars.car_year, cars.car_color
+        FROM users
+        LEFT JOIN cars ON users.id = cars.user_id
+        WHERE users.phone_number = ?;
+        """
+        cursor = await db.execute(query, (phone_number,))
+        rows = await cursor.fetchall()
+
+        if not rows:
+            print(f"Такого пользователя ещё нет в базе данных")
+            return None
+
+        # Преобразуем результат в словарь
+        client_info = {
+            "user": {
+                "id": rows[0][0],
+                "telegram_id": rows[0][1],
+                "username": rows[0][2],
+                "first_name": rows[0][3],
+                "phone_number": rows[0][4],
+            },
+            "cars": []
+        }
+
+        for row in rows:
+            car = {
+                "car_number": row[5],
+                "car_brand": row[6],
+                "car_model": row[7],
+                "car_year": row[8],
+                "car_color": row[9],
+            }
+            if car["car_number"] is not None:  # Проверяем, что автомобиль существует
+                client_info["cars"].append(car)
+
+        return client_info
+
+
+async def get_car_and_owner_by_number(car_number: str):
+    async with aiosqlite.connect("users.db") as db:
+        query = """
+        SELECT cars.user_id, cars.car_number, cars.car_brand, cars.car_model, cars.car_year, cars.car_color,
+               users.id, users.telegram_id, users.username, users.first_name, users.phone_number
+        FROM cars
+        LEFT JOIN users ON cars.user_id = users.id
+        WHERE cars.car_number = ?;
+        """
+        cursor = await db.execute(query, (car_number,))
+        row = await cursor.fetchone()
+
+        if row is None:
+            print(f"Такого авто нет в базе данных")
+            return None
+
+        # Преобразуем результат в словарь
+        car_info = {
+            "car": {
+                "user_id": row[0],
+                "car_number": row[1],
+                "car_brand": row[2],
+                "car_model": row[3],
+                "car_year": row[4],
+                "car_color": row[5],
+            },
+            "owner": {
+                "id": row[6],
+                "telegram_id": row[7],
+                "username": row[8],
+                "first_name": row[9],
+                "phone_number": row[10],
+            }
+        }
+
+        return car_info

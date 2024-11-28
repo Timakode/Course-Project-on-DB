@@ -13,7 +13,7 @@ from decouple import config
 from db import *
 import re
 from aiogram.fsm.context import FSMContext
-from utils.states import UserData, UserDataforAdmin, EditProfile
+from utils.states import *
 from aiogram.utils.markdown import hlink
 
 
@@ -371,6 +371,53 @@ async def repainted_car_callback(call: CallbackQuery, state: FSMContext):
         await call.message.answer("Поздравляю, авто успешно добавлено!",
                                    reply_markup=keyboard.after_start_kb)
     await call.answer()
+
+
+@router.message(F.text.lower() == "поиск")
+async def search_handler(message: types.Message, state: FSMContext):
+    await state.set_state(SearchData.search_input)
+    await message.answer("Введите номер телефона в формате +79491234567 или номер автомобиля:")
+
+
+@router.message(SearchData.search_input)
+async def process_input(message: types.Message, state: FSMContext):
+    user_input = message.text.strip()
+
+    # Проверяем, является ли ввод номером телефона или номером автомобиля
+    phone_pattern = re.compile(r"^\+?\d{11,15}$")
+
+    if phone_pattern.match(user_input):
+        client_info = await get_client_and_cars_by_phone(user_input)
+        if client_info:
+            response = f"Пользователь найден:\n" \
+                       f"Имя: {client_info['user']['first_name']}\n" \
+                       f"Телефон: {client_info['user']['phone_number']}\n" \
+                       f"Автомобили:\n"
+            for car in client_info['cars']:
+                response += f"- {car['car_brand']} {car['car_model']} ({car['car_year']}) - {car['car_number']}\n"
+            await message.answer(response)
+        else:
+            await message.answer("Пользователь не найден.")
+
+    elif len(user_input) > 0:  # Предположим, что номер автомобиля не пустой
+        car_info = await get_car_and_owner_by_number(user_input)
+        if car_info:
+            response = f"Автомобиль найден:\n" \
+                       f"Марка: {car_info['car']['car_brand']}\n" \
+                       f"Модель: {car_info['car']['car_model']}\n" \
+                       f"Год: {car_info['car']['car_year']}\n" \
+                       f"Цвет: {car_info['car']['car_color']}\n" \
+                       f"Номер: {car_info['car']['car_number']}\n" \
+                       f"Владелец:\n" \
+                       f"Имя: {car_info['owner']['first_name']}\n" \
+                       f"Телефон: {car_info['owner']['phone_number']}\n"
+            await message.answer(response)
+        else:
+            await message.answer("Автомобиль не найден.")
+    else:
+        await message.answer("Некорректный ввод. Пожалуйста, введите номер телефона или номер автомобиля.")
+
+    await state.clear()  # Завершаем состояние после обработки ввода
 
 
 @router.message(F.text.lower() == "наши контакты")

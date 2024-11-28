@@ -64,6 +64,9 @@ after_start_admin_kb = ReplyKeyboardMarkup(
             KeyboardButton(text="Зарегистрировать клиента")
         ],
         [
+            KeyboardButton(text="Поиск")
+        ],
+        [
             KeyboardButton(text="Редактировать профиль"),
             KeyboardButton(text="Редактировать профиль клиента")
         ],

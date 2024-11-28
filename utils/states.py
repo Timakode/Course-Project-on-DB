@@ -24,3 +24,6 @@ class EditProfile(StatesGroup):
     car_color = State()
     wrapped_car = State()
     repainted_car = State()
+
+class SearchData(StatesGroup):
+    search_input = State()
