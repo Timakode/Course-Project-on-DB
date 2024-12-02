@@ -27,3 +27,16 @@ class EditProfile(StatesGroup):
 
 class SearchData(StatesGroup):
     search_input = State()
+
+class BookingStates(StatesGroup):
+    start = State()
+    sign_up = State()  # Для бронирования
+    select_date = State()
+    input_client_data = State()
+    select_car = State()
+    input_service = State()
+    cancel = State()  # Для отмены бронирования
+    complete_work = State()  # Для завершения работы
+    reschedule = State()  # Для переноса бронирования
+    waiting_for_service_description = State()  # Для описания услуги
+    waiting_for_new_date = State()

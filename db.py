@@ -1,9 +1,10 @@
 import aiosqlite
+from datetime import datetime, timedelta
 
 async def initialize_database():
     # Подключаемся к базе данных (если база данных не существует, она будет создана)
     async with aiosqlite.connect("users.db") as db:
-        # Создаем таблицу users, если она не существует
+        # Создаем таблицу users
         await db.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -14,7 +15,7 @@ async def initialize_database():
             );
         """)
 
-        # Создаем таблицу cars, если она не существует
+        # Создаем таблицу cars
         await db.execute("""
                     CREATE TABLE IF NOT EXISTS cars (
                         user_id INTEGER,  -- Ссылка на id пользователя из таблицы users
@@ -26,6 +27,19 @@ async def initialize_database():
                         wrapped_car TEXT,
                         repainted_car TEXT,
                         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                    );
+                """)
+
+        # Таблица записей
+        await db.execute("""
+                    CREATE TABLE IF NOT EXISTS bookings (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        car_number TEXT,
+                        date TEXT,
+                        post_number INTEGER,
+                        service_description TEXT,
+                        status TEXT CHECK(status IN ('запланировано', 'в работе', 'завершено')) DEFAULT 'запланировано',
+                        FOREIGN KEY (car_number) REFERENCES cars(car_number) ON DELETE CASCADE
                     );
                 """)
 
@@ -221,3 +235,105 @@ async def get_car_and_owner_by_number(car_number: str):
         }
 
         return car_info
+
+
+async def get_available_dates():
+    async with aiosqlite.connect("users.db") as db:
+        today = datetime.now()
+        free_dates = []
+
+        for i in range(30):  # Проверяем на 30 дней вперёд
+            date = (today + timedelta(days=i)).strftime("%Y-%m-%d")
+            # Для каждой даты считаем количество занятых постов
+            cursor = await db.execute("""
+                SELECT COUNT(DISTINCT post_number) FROM bookings WHERE date = ?
+            """, (date,))
+            count = await cursor.fetchone()
+
+            if count[0] < 5:  # Если занято меньше 5 постов, дата считается свободной
+                free_dates.append(date)
+
+        return free_dates
+
+
+async def get_client_by_id(user_id: int):
+    async with aiosqlite.connect('users.db') as db:
+        cursor = await db.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+        row = await cursor.fetchone()
+
+        if row:
+            # Преобразуем кортеж в словарь с помощью имен столбцов
+            columns = [description[0] for description in cursor.description]
+            client = dict(zip(columns, row))
+            return client
+    return None
+
+
+
+async def get_cars_by_client(user_id: int):
+    async with aiosqlite.connect('users.db') as db:
+        async with db.execute("SELECT * FROM cars WHERE user_id = ?", (user_id,)) as cursor:
+            cars = await cursor.fetchall()
+    return [dict(car) for car in cars] if cars else []
+
+
+async def add_booking(booking_date, car_number, client_id, service_description):
+    async with aiosqlite.connect('users.db') as db:
+        # Найдём первый свободный пост для выбранной даты
+        cursor = await db.execute("""
+            SELECT post_number FROM bookings WHERE date = ? ORDER BY post_number
+        """, (booking_date,))
+        taken_posts = await cursor.fetchall()
+
+        # Если все посты заняты, возвращаем ошибку
+        if len(taken_posts) >= 5:
+            return False  # Нет свободных постов
+
+        # Находим первый свободный пост
+        all_posts = {1, 2, 3, 4, 5}
+        taken_posts_set = set(post[0] for post in taken_posts)
+        free_posts = all_posts - taken_posts_set
+
+        # Выбираем первый свободный пост
+        post_number = min(free_posts)
+
+        # Вставляем запись в таблицу bookings
+        await db.execute("""
+            INSERT INTO bookings (car_number, date, service_description, post_number, status)
+            VALUES (?, ?, ?, ?, ?)
+        """, (car_number, booking_date, service_description, post_number, 'запланировано'))
+        await db.commit()
+
+        return True
+
+
+async def get_active_bookings():
+    query = """
+    SELECT 
+        b.status, 
+        b.date AS booking_date,
+        b.service_description,
+        c.car_brand,
+        c.car_model,
+        c.car_year,
+        c.car_color,
+        c.car_number,
+        u.first_name,
+        u.phone_number,
+        u.username
+    FROM bookings b
+    JOIN cars c ON b.car_number = c.car_number
+    JOIN users u ON c.user_id = u.id
+    WHERE b.status IN ('запланировано', 'в работе')
+    ORDER BY 
+        CASE 
+            WHEN b.status = 'в работе' THEN 1
+            WHEN b.status = 'запланировано' THEN 2
+        END,
+        DATE(b.date) ASC;  -- Преобразуем строку в дату
+    """
+    async with aiosqlite.connect("users.db") as db:
+        cursor = await db.execute(query)
+        bookings = await cursor.fetchall()
+        await cursor.close()
+    return bookings

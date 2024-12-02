@@ -304,7 +304,6 @@ async def car_color(message: Message, state: FSMContext):
     )
 
 
-
 @router.callback_query(StateFilter(EditProfile.wrapped_car))
 async def wrapped_car_callback(call: CallbackQuery, state: FSMContext):
     if call.data == "wrap_yes":
@@ -348,8 +347,6 @@ async def repainted_car_callback(call: CallbackQuery, state: FSMContext):
     car_color = data.get("car_color")
     wrapped_car = data.get("wrapped_car")
     repainted_car = data.get("repainted_car")
-
-
 
     await add_car(
         car_number=car_number,
@@ -418,6 +415,196 @@ async def process_input(message: types.Message, state: FSMContext):
         await message.answer("Некорректный ввод. Пожалуйста, введите номер телефона или номер автомобиля.")
 
     await state.clear()  # Завершаем состояние после обработки ввода
+
+
+@router.message(F.text.lower() == "запись")
+async def book_handler(message: Message, state: FSMContext):
+    await message.answer("Выберите действие", reply_markup=keyboard.sign_up_kb)
+    await state.set_state(BookingStates.start)
+
+
+@router.message(BookingStates.start)
+async def booking_start(message: Message, state: FSMContext):
+    if message.text.lower() == "новая запись":
+        # Получаем список доступных дат из БД
+        available_dates = await get_available_dates()
+        if not available_dates:
+            await message.answer("К сожалению, нет доступных дат для записи на ближайшие 30 дней.")
+            return
+        # Создаём инлайн-клавиатуру с доступными датами
+        inline_kb = keyboard.get_booking_keyboard(available_dates)
+        await message.answer("Выберите дату для записи:", reply_markup=inline_kb)
+        await state.set_state(BookingStates.select_date)
+
+    elif message.text.lower() == "завершение работы":
+        await state.set_state(BookingStates.complete_work)
+    elif message.text.lower() == "отмена записи":
+        await state.set_state(BookingStates.cancel)
+    elif message.text.lower() == "перенос записи":
+        await state.set_state(BookingStates.reschedule)
+    elif message.text.lower() == "список записей":
+        bookings = await get_active_bookings()
+
+        if not bookings:
+            await message.answer("Нет активных записей.")
+            return
+
+        for booking in bookings:
+            status, booking_date, service_description, car_brand, car_model, car_year, car_color, car_number, first_name, phone_number, username = booking
+
+            car_info = f"Марка: {car_brand}, Модель: {car_model}, Год: {car_year}, Цвет: {car_color}, Номер: {car_number}"
+            client_info = f"Имя: {first_name}, Телефон: {phone_number}, Username: @{username}" if username else f"Имя: {first_name}, Телефон: {phone_number}"
+
+            message_text = f"""Статус: {status}
+            Дата: {booking_date}
+            Услуга: {service_description}
+            Авто: {car_info}
+            Клиент: {client_info}"""
+
+            await message.answer(message_text)
+
+
+
+@router.callback_query(StateFilter(BookingStates.select_date))
+async def select_date_callback(call: CallbackQuery, state: FSMContext):
+    date = call.data.split("_")[1]
+    await state.update_data(booking_date=date)
+    await call.message.answer("Введите номер телефона или номер автомобиля:")
+    await state.set_state(BookingStates.input_client_data)
+
+
+@router.message(BookingStates.input_client_data)
+async def input_client_data(message: Message, state: FSMContext):
+    user_input = message.text.strip()
+
+    phone_pattern = re.compile(r"^\+?\d{10,15}$")  # Шаблон для номера телефона
+
+    if phone_pattern.match(user_input):
+        client_info = await get_client_and_cars_by_phone(user_input)
+        if client_info:
+            cars = client_info['cars']
+            await state.update_data(client_id=client_info['user']['id'])  # Сохраняем client_id в состоянии
+            if not cars:
+                await message.answer("У вас нет добавленных автомобилей. Пожалуйста, добавьте автомобиль.",
+                                     reply_markup=keyboard.after_start_admin_kb)
+                await state.clear()
+                #await state.set_state(EditProfile.addAuto)
+                return
+
+            # Формируем клавиатуру с номерами автомобилей
+            inline_kb = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text=car["car_number"], callback_data=f"car_{car['car_number']}")]
+                    for car in cars
+                ]
+            )
+
+            response = f"Пользователь найден:\n" \
+                       f"Имя: {client_info['user']['first_name']}\n" \
+                       f"Телефон: {client_info['user']['phone_number']}\n" \
+                       f"Выберите автомобиль:"
+            await message.answer(response, reply_markup=inline_kb)
+            await state.set_state(BookingStates.select_car)
+        else:
+            await message.answer("Пользователь не найден. Пожалуйста, зарегистрируйтесь.",
+                                 reply_markup=keyboard.after_start_admin_kb)
+            await state.clear()
+            #await state.set_state(UserData.phone)
+
+    elif len(user_input) > 0:  # Обработка номера автомобиля
+        car_info = await get_car_and_owner_by_number(user_input)
+        if car_info:
+            owner = car_info["owner"]
+            car = car_info["car"]
+            response = f"Автомобиль найден:\n" \
+                       f"Марка: {car['car_brand']}\n" \
+                       f"Модель: {car['car_model']}\n" \
+                       f"Год: {car['car_year']}\n" \
+                       f"Цвет: {car['car_color']}\n" \
+                       f"Номер: {car['car_number']}\n" \
+                       f"Владелец:\n" \
+                       f"Имя: {owner['first_name']}\n" \
+                       f"Телефон: {owner['phone_number']}\n"
+            await message.answer(response)
+
+            await state.update_data(car_number=user_input, client_id=owner["id"])
+            await message.answer("Введите описание услуги:")
+            await state.set_state(BookingStates.input_service)
+        else:
+            await message.answer("Автомобиль не найден.", reply_markup=keyboard.after_start_admin_kb)
+            await state.clear()
+    else:
+        await message.answer("Некорректный ввод. Пожалуйста, введите номер телефона или номер автомобиля.")
+        await state.clear()  # Завершаем состояние после некорректного ввода
+
+
+@router.callback_query(StateFilter(BookingStates.select_car))
+async def select_car_callback(call: CallbackQuery, state: FSMContext):
+    car_number = call.data.split("_")[1]
+    await state.update_data(car_number=car_number)
+    await call.message.answer("Введите описание услуги:")
+    await state.set_state(BookingStates.input_service)
+
+
+@router.message(BookingStates.input_service)
+async def input_service(message: Message, state: FSMContext):
+    service_description = message.text.strip()  # Описание услуги
+    data = await state.get_data()
+
+    # Получаем данные из состояния
+    booking_date = data.get("booking_date")  # Дата записи
+    car_number = data.get("car_number")  # Номер автомобиля
+    client_id = data.get("client_id")  # ID клиента
+
+    # Очистим booking_date от лишнего текста "date:"
+    if booking_date:
+        booking_date = booking_date.replace("date:", "").strip()  # Удаляем "date:" и лишние пробелы
+
+    # Если все необходимые данные есть, создаём запись
+    if booking_date and car_number and client_id:
+        success = await add_booking(booking_date, car_number, client_id, service_description)
+        if success:
+            # Получаем информацию о машине и владельце
+            car_info = await get_car_and_owner_by_number(car_number)
+
+            if car_info is None:
+                await message.answer("Не удалось найти информацию о автомобиле.")
+                return
+
+            # Форматируем информацию об автомобиле и владельце
+            car = car_info["car"]
+            owner = car_info["owner"]
+
+            car_info_text = f"Марка: {car['car_brand']}, Модель: {car['car_model']}, Год: {car['car_year']}, Цвет: {car['car_color']}, Номер: {car['car_number']}"
+            owner_info_text = f"Имя: {owner['first_name']}, Телефон: {owner['phone_number']}, Username: @{owner['username']}"
+
+            # Формируем сообщение для отправки
+            message_text = f"""Новая запись!
+Дата: {booking_date}
+Услуга: {service_description}
+Авто: {car_info_text}
+Клиент: {owner_info_text}"""
+
+            await message.answer(message_text, reply_markup=keyboard.after_start_admin_kb)
+        else:
+            await message.answer(
+                f"К сожалению, на дату {booking_date} все посты заняты. Пожалуйста, выберите другую дату.")
+        await state.clear()
+    else:
+        await message.answer("Произошла ошибка. Пожалуйста, попробуйте снова.")
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 @router.message(F.text.lower() == "наши контакты")

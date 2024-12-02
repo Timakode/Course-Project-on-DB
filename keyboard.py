@@ -60,7 +60,7 @@ after_start_kb = ReplyKeyboardMarkup(
 after_start_admin_kb = ReplyKeyboardMarkup(
     keyboard=[
         [
-            KeyboardButton(text="Записать клиента"),
+            KeyboardButton(text="Запись"),
             KeyboardButton(text="Зарегистрировать клиента")
         ],
         [
@@ -74,6 +74,28 @@ after_start_admin_kb = ReplyKeyboardMarkup(
             KeyboardButton(text="Наши контакты"),
             KeyboardButton(text="Помощь")
         ]
+    ],
+    resize_keyboard=True,
+    input_field_placeholder="Выберите пункт меню",
+    selective=True
+)
+
+
+sign_up_kb = ReplyKeyboardMarkup(
+    keyboard=[
+        [
+            KeyboardButton(text="Новая запись"),
+        ],
+        [
+            KeyboardButton(text="Завершение работы")
+        ],
+        [
+            KeyboardButton(text="Список записей")
+        ],
+        [
+            KeyboardButton(text="Отмена записи"),
+            KeyboardButton(text="Перенос записи")
+        ],
     ],
     resize_keyboard=True,
     input_field_placeholder="Выберите пункт меню",
@@ -113,6 +135,7 @@ def wrap_car_kb():
     ])
     return keyboard
 
+
 def repaint_car_kb():
     # Создаём кнопки
     button_yes = InlineKeyboardButton(text="Да", callback_data="repaint_yes")
@@ -121,4 +144,11 @@ def repaint_car_kb():
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [button_yes, button_no]  # Добавляем кнопки в одну строку
     ])
+    return keyboard
+
+
+def get_booking_keyboard(free_dates):
+    # Генерация инлайн-клавиатуры с кнопками на каждую дату
+    buttons = [InlineKeyboardButton(text=date, callback_data=f"book_date:{date}") for date in free_dates]
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[buttons[i:i + 3] for i in range(0, len(buttons), 3)])
     return keyboard
