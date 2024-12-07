@@ -152,3 +152,14 @@ def get_booking_keyboard(free_dates):
     buttons = [InlineKeyboardButton(text=date, callback_data=f"book_date:{date}") for date in free_dates]
     keyboard = InlineKeyboardMarkup(inline_keyboard=[buttons[i:i + 3] for i in range(0, len(buttons), 3)])
     return keyboard
+
+
+def cancel_booking_keyboard(booking_id: int) -> InlineKeyboardMarkup:
+    """
+    Создаёт клавиатуру с кнопкой для отмены записи.
+    """
+    # Создаём клавиатуру с одной кнопкой
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Отменить эту запись", callback_data=f"cancel_{booking_id}")]
+    ])
+    return keyboard

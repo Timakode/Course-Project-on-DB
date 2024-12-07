@@ -439,7 +439,27 @@ async def booking_start(message: Message, state: FSMContext):
     elif message.text.lower() == "завершение работы":
         await state.set_state(BookingStates.complete_work)
     elif message.text.lower() == "отмена записи":
+        # Получаем все активные записи
+        all_bookings = await get_all_active_bookings()
+
+        if not all_bookings:
+            await message.answer("Нет активных записей, которые можно отменить.")
+            await state.clear()
+            return
+
+        # Выводим информацию о каждой записи
+        for booking in all_bookings:
+            booking_id, booking_date, service_description, car_brand, car_number, first_name, phone_number = booking
+            message_text = (
+                f"ID записи: {booking_id}\n"
+                f"Дата: {booking_date}\n"
+                f"Услуга: {service_description}\n"
+                f"Авто: {car_brand}, Номер: {car_number}\n"
+                f"Клиент: {first_name}, Телефон: {phone_number}"
+            )
+            await message.answer(message_text, reply_markup=keyboard.cancel_booking_keyboard(booking_id))
         await state.set_state(BookingStates.cancel)
+
     elif message.text.lower() == "перенос записи":
         await state.set_state(BookingStates.reschedule)
     elif message.text.lower() == "список записей":
@@ -456,12 +476,12 @@ async def booking_start(message: Message, state: FSMContext):
             client_info = f"Имя: {first_name}, Телефон: {phone_number}, Username: @{username}" if username else f"Имя: {first_name}, Телефон: {phone_number}"
 
             message_text = f"""Статус: {status}
-            Дата: {booking_date}
-            Услуга: {service_description}
-            Авто: {car_info}
-            Клиент: {client_info}"""
+Дата: {booking_date}
+Услуга: {service_description}
+Авто: {car_info}
+Клиент: {client_info}"""
 
-            await message.answer(message_text)
+            await message.answer(message_text, reply_markup=keyboard.after_start_admin_kb)
 
 
 
@@ -593,6 +613,25 @@ async def input_service(message: Message, state: FSMContext):
     else:
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте снова.")
 
+
+@router.callback_query(BookingStates.cancel)
+async def booking_cancel_selection(callback_query: CallbackQuery, state: FSMContext):
+    data = callback_query.data
+
+    if data.startswith("cancel_"):
+        # Получаем ID записи
+        booking_id = int(data.split("_")[1])
+
+        # Отменяем запись в базе данных
+        await cancel_booking(booking_id)
+
+        # Уведомляем администратора
+        await callback_query.message.answer(f"Запись с ID {booking_id} успешно отменена.")
+        await callback_query.answer("Запись отменена.", show_alert=True)
+
+        await state.clear()
+    else:
+        await callback_query.answer("Некорректный выбор.", show_alert=True)
 
 
 

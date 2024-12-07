@@ -36,6 +36,7 @@ class BookingStates(StatesGroup):
     select_car = State()
     input_service = State()
     cancel = State()  # Для отмены бронирования
+    select_booking_to_cancel = State()
     complete_work = State()  # Для завершения работы
     reschedule = State()  # Для переноса бронирования
     waiting_for_service_description = State()  # Для описания услуги

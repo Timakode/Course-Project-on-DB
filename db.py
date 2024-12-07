@@ -38,7 +38,7 @@ async def initialize_database():
                         date TEXT,
                         post_number INTEGER,
                         service_description TEXT,
-                        status TEXT CHECK(status IN ('запланировано', 'в работе', 'завершено')) DEFAULT 'запланировано',
+                        status TEXT CHECK(status IN ('запланировано', 'в работе', 'завершено', 'отменено')) DEFAULT 'запланировано',
                         FOREIGN KEY (car_number) REFERENCES cars(car_number) ON DELETE CASCADE
                     );
                 """)
@@ -331,6 +331,45 @@ async def get_active_bookings():
             WHEN b.status = 'запланировано' THEN 2
         END,
         DATE(b.date) ASC;  -- Преобразуем строку в дату
+    """
+    async with aiosqlite.connect("users.db") as db:
+        cursor = await db.execute(query)
+        bookings = await cursor.fetchall()
+        await cursor.close()
+    return bookings
+
+
+async def cancel_booking(booking_id: int):
+    """
+    Обновляет статус записи на 'отменено'.
+    """
+    async with aiosqlite.connect("users.db") as db:
+        await db.execute("""
+            UPDATE bookings
+            SET status = ?
+            WHERE id = ?
+        """, ('отменено', booking_id))
+        await db.commit()
+
+
+async def get_all_active_bookings():
+    """
+    Возвращает список всех активных записей, кроме уже отменённых и завершённых.
+    """
+    query = """
+    SELECT 
+        b.id AS booking_id,
+        b.date AS booking_date,
+        b.service_description,
+        c.car_brand,
+        c.car_number,
+        u.first_name,
+        u.phone_number
+    FROM bookings b
+    JOIN cars c ON b.car_number = c.car_number
+    JOIN users u ON c.user_id = u.id
+    WHERE b.status NOT IN ('отменено', 'завершено')
+    ORDER BY DATE(b.date) ASC;
     """
     async with aiosqlite.connect("users.db") as db:
         cursor = await db.execute(query)
