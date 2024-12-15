@@ -41,3 +41,5 @@ class BookingStates(StatesGroup):
     reschedule = State()  # Для переноса бронирования
     waiting_for_service_description = State()  # Для описания услуги
     waiting_for_new_date = State()
+    select_reschedule = State()
+    select_new_date = State()

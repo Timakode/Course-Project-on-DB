@@ -436,8 +436,8 @@ async def booking_start(message: Message, state: FSMContext):
         await message.answer("Выберите дату для записи:", reply_markup=inline_kb)
         await state.set_state(BookingStates.select_date)
 
-    elif message.text.lower() == "завершение работы":
-        await state.set_state(BookingStates.complete_work)
+    #elif message.text.lower() == "завершение работы":
+    #    await state.set_state(BookingStates.complete_work)
     elif message.text.lower() == "отмена записи":
         # Получаем все активные записи
         all_bookings = await get_all_active_bookings()
@@ -461,7 +461,24 @@ async def booking_start(message: Message, state: FSMContext):
         await state.set_state(BookingStates.cancel)
 
     elif message.text.lower() == "перенос записи":
-        await state.set_state(BookingStates.reschedule)
+        bookings = await get_scheduled_bookings()
+
+        if not bookings:
+            await message.answer("Нет записей со статусом 'запланировано'.")
+            await state.clear()
+            return
+
+        for booking in bookings:
+            booking_id, booking_date, service_description, car_brand, car_number, first_name, phone_number = booking
+            message_text = (
+                f"ID записи: {booking_id}\n"
+                f"Дата: {booking_date}\n"
+                f"Услуга: {service_description}\n"
+                f"Авто: {car_brand}, Номер: {car_number}\n"
+                f"Клиент: {first_name}, Телефон: {phone_number}"
+            )
+            await message.answer(message_text, reply_markup=keyboard.reschedule_booking_keyboard(booking_id))
+        await state.set_state(BookingStates.select_reschedule)
     elif message.text.lower() == "список записей":
         bookings = await get_active_bookings()
 
@@ -634,6 +651,57 @@ async def booking_cancel_selection(callback_query: CallbackQuery, state: FSMCont
         await callback_query.answer("Некорректный выбор.", show_alert=True)
 
 
+# Обработчик для выбора записи для переноса
+@router.callback_query(StateFilter(BookingStates.select_reschedule))
+async def select_reschedule_callback(call: CallbackQuery, state: FSMContext):
+    booking_id = int(call.data.split("_")[1])
+    await state.update_data(booking_id=booking_id)
+
+    # Получаем список доступных дат из БД
+    available_dates = await get_available_dates()
+    if not available_dates:
+        await call.message.answer("К сожалению, нет доступных дат для записи на ближайшие 30 дней.")
+        await state.clear()
+        return
+
+    # Создаём инлайн-клавиатуру с доступными датами в три столбца
+    inline_kb = keyboard.get_booking_keyboard(available_dates)
+    await call.message.answer("Выберите новую дату для записи:", reply_markup=inline_kb)
+    await state.set_state(BookingStates.select_new_date)
+
+# Обработчик для выбора новой даты
+@router.callback_query(StateFilter(BookingStates.select_new_date))
+async def select_new_date_callback(call: CallbackQuery, state: FSMContext):
+    new_date = call.data.split("_")[1]
+    data = await state.get_data()
+    booking_id = data.get("booking_id")
+
+    # Убираем "date:" из даты
+    if new_date.startswith("date:"):
+        new_date = new_date[len("date:"):]
+
+    # Получаем данные о текущей записи
+    booking = await get_booking_by_id(booking_id)
+
+    if booking:
+        # Удаляем старую запись
+        await delete_booking(booking_id)
+
+        # Вставляем новую запись с новой датой
+        success = await add_booking(new_date, booking[1], booking[5], booking[4])
+        if success:
+            await call.message.answer(f"Запись успешно перенесена на новую дату: {new_date}",
+                                      reply_markup=keyboard.after_start_admin_kb)
+        else:
+            await call.message.answer("Произошла ошибка при переносе записи.",
+                                      reply_markup=keyboard.after_start_admin_kb)
+    else:
+        await call.message.answer("Произошла ошибка при переносе записи.",
+                                  reply_markup=keyboard.after_start_admin_kb)
+
+    # Прекращаем выполнение инлайн-клавиатуры и очищаем состояние
+    await state.clear()
+    await call.message.edit_reply_markup()
 
 
 

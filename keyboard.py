@@ -86,9 +86,9 @@ sign_up_kb = ReplyKeyboardMarkup(
         [
             KeyboardButton(text="Новая запись"),
         ],
-        [
-            KeyboardButton(text="Завершение работы")
-        ],
+        #[
+        #    KeyboardButton(text="Завершение работы")
+        #],
         [
             KeyboardButton(text="Список записей")
         ],
@@ -163,3 +163,10 @@ def cancel_booking_keyboard(booking_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Отменить эту запись", callback_data=f"cancel_{booking_id}")]
     ])
     return keyboard
+
+
+def reschedule_booking_keyboard(booking_id):
+    inline_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Перенести эту запись", callback_data=f"reschedule_{booking_id}")]
+    ])
+    return inline_kb

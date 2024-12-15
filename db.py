@@ -297,6 +297,10 @@ async def add_booking(booking_date, car_number, client_id, service_description):
         # Выбираем первый свободный пост
         post_number = min(free_posts)
 
+        # Убираем "date:" из даты
+        if booking_date.startswith("date:"):
+            booking_date = booking_date[len("date:"):]
+
         # Вставляем запись в таблицу bookings
         await db.execute("""
             INSERT INTO bookings (car_number, date, service_description, post_number, status)
@@ -376,3 +380,39 @@ async def get_all_active_bookings():
         bookings = await cursor.fetchall()
         await cursor.close()
     return bookings
+
+
+async def get_scheduled_bookings():
+    query = """
+    SELECT
+        b.id AS booking_id,
+        b.date AS booking_date,
+        b.service_description,
+        c.car_brand,
+        c.car_number,
+        u.first_name,
+        u.phone_number
+    FROM bookings b
+    JOIN cars c ON b.car_number = c.car_number
+    JOIN users u ON c.user_id = u.id
+    WHERE b.status = 'запланировано'
+    ORDER BY DATE(b.date) ASC;
+    """
+    async with aiosqlite.connect("users.db") as db:
+        cursor = await db.execute(query)
+        bookings = await cursor.fetchall()
+        await cursor.close()
+    return bookings
+
+async def get_booking_by_id(booking_id):
+    async with aiosqlite.connect("users.db") as db:
+        cursor = await db.execute("SELECT * FROM bookings WHERE id = ?", (booking_id,))
+        booking = await cursor.fetchone()
+        return booking
+
+async def delete_booking(booking_id):
+    async with aiosqlite.connect("users.db") as db:
+        await db.execute("DELETE FROM bookings WHERE id = ?", (booking_id,))
+        await db.commit()
+
+
