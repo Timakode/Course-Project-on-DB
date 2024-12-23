@@ -54,7 +54,6 @@ async def help_command(message:Message) -> None:
     await message.answer(f"""Список команд, доступных в боте:\n/start - запуск бота\n/help - помощь""")
 
 
-
 @router.message(F.text.lower() == "регистрация")
 async def registration(message:Message, state: FSMContext) -> None:
     global phone_number
@@ -126,10 +125,19 @@ async def form_name(message: Message, state: FSMContext):
                              reply_markup=keyboard.after_start_kb)
 
 
+@router.message(lambda message: message.text.lower() == "назад")
+async def back_to_main_menu(message: Message, state: FSMContext):
+    # Очищаем текущее состояние
+    await state.clear()
+    # Возвращаем пользователя в главное меню
+    await message.answer("Вы вернулись в главное меню.", reply_markup=keyboard.after_start_admin_kb)
+
+
 @router.message(F.text.lower() == "зарегистрировать клиента")
 async def registration_admin(message: Message, state: FSMContext):
     # Начало регистрации клиента
-    await message.answer("Пожалуйста, введите номер телефона Клиента в формате +79491234567")
+    await message.answer("Пожалуйста, введите номер телефона Клиента в формате +79491234567",
+                         reply_markup=keyboard.user_reg_kb)
     await state.set_state(UserDataforAdmin.phone)
 
 @router.message(UserDataforAdmin.phone)
@@ -373,7 +381,8 @@ async def repainted_car_callback(call: CallbackQuery, state: FSMContext):
 @router.message(F.text.lower() == "поиск")
 async def search_handler(message: types.Message, state: FSMContext):
     await state.set_state(SearchData.search_input)
-    await message.answer("Введите номер телефона в формате +79491234567 или номер автомобиля:")
+    await message.answer("Введите номер телефона в формате +79491234567 или номер автомобиля:",
+                         reply_markup=keyboard.user_reg_kb)
 
 
 @router.message(SearchData.search_input)
@@ -436,8 +445,27 @@ async def booking_start(message: Message, state: FSMContext):
         await message.answer("Выберите дату для записи:", reply_markup=inline_kb)
         await state.set_state(BookingStates.select_date)
 
-    #elif message.text.lower() == "завершение работы":
-    #    await state.set_state(BookingStates.complete_work)
+    elif message.text.lower() == "завершение работы":
+        all_bookings = await get_all_active_bookings()
+
+        if not all_bookings:
+            await message.answer("Нет активных записей, которые можно завершить.")
+            await state.clear()
+            return
+
+        for booking in all_bookings:
+            booking_id, booking_date, service_description, car_brand, car_number, first_name, phone_number = booking
+            message_text = (
+                f"ID записи: {booking_id}\n"
+                f"Дата: {booking_date}\n"
+                f"Услуга: {service_description}\n"
+                f"Авто: {car_brand}, Номер: {car_number}\n"
+                f"Клиент: {first_name}, Телефон: {phone_number}"
+            )
+            await message.answer(message_text, reply_markup=keyboard.complete_work_keyboard(booking_id))
+
+        await state.set_state(BookingStates.complete_work)
+
     elif message.text.lower() == "отмена записи":
         # Получаем все активные записи
         all_bookings = await get_all_active_bookings()
@@ -499,7 +527,6 @@ async def booking_start(message: Message, state: FSMContext):
 Клиент: {client_info}"""
 
             await message.answer(message_text, reply_markup=keyboard.after_start_admin_kb)
-
 
 
 @router.callback_query(StateFilter(BookingStates.select_date))
@@ -631,6 +658,25 @@ async def input_service(message: Message, state: FSMContext):
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте снова.")
 
 
+@router.callback_query(BookingStates.complete_work)
+async def complete_work_selection(callback_query: CallbackQuery, state: FSMContext):
+    data = callback_query.data
+
+    if data.startswith("complete_"):
+        # Получаем ID записи
+        booking_id = int(data.split("_")[1])
+
+        # Обновляем статус записи
+        await complete_booking(booking_id)
+
+        # Уведомляем администратора
+        await callback_query.message.answer(f"Работа с записью ID {booking_id} успешно завершена.", reply_markup=keyboard.after_start_admin_kb)
+
+        await state.clear()
+    else:
+        await callback_query.message.answer("Некорректный выбор.", reply_markup=keyboard.after_start_admin_kb)
+
+
 @router.callback_query(BookingStates.cancel)
 async def booking_cancel_selection(callback_query: CallbackQuery, state: FSMContext):
     data = callback_query.data
@@ -643,12 +689,11 @@ async def booking_cancel_selection(callback_query: CallbackQuery, state: FSMCont
         await cancel_booking(booking_id)
 
         # Уведомляем администратора
-        await callback_query.message.answer(f"Запись с ID {booking_id} успешно отменена.")
-        await callback_query.answer("Запись отменена.", show_alert=True)
+        await callback_query.message.answer(f"Запись с ID {booking_id} успешно отменена.", reply_markup=keyboard.after_start_admin_kb)
 
         await state.clear()
     else:
-        await callback_query.answer("Некорректный выбор.", show_alert=True)
+        await callback_query.message.answer("Некорректный выбор.", reply_markup=keyboard.after_start_admin_kb)
 
 
 # Обработчик для выбора записи для переноса

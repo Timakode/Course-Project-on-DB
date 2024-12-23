@@ -86,9 +86,9 @@ sign_up_kb = ReplyKeyboardMarkup(
         [
             KeyboardButton(text="Новая запись"),
         ],
-        #[
-        #    KeyboardButton(text="Завершение работы")
-        #],
+        [
+            KeyboardButton(text="Завершение работы")
+        ],
         [
             KeyboardButton(text="Список записей")
         ],
@@ -96,12 +96,25 @@ sign_up_kb = ReplyKeyboardMarkup(
             KeyboardButton(text="Отмена записи"),
             KeyboardButton(text="Перенос записи")
         ],
+        [
+            KeyboardButton(text="Назад")
+        ],
     ],
     resize_keyboard=True,
     input_field_placeholder="Выберите пункт меню",
     selective=True
 )
 
+user_reg_kb = ReplyKeyboardMarkup(
+    keyboard=[
+        [
+            KeyboardButton(text="Назад")
+        ],
+    ],
+    resize_keyboard=True,
+    input_field_placeholder="Выберите пункт меню",
+    selective=True
+)
 
 edit_kb = ReplyKeyboardMarkup(
     keyboard=[
@@ -170,3 +183,13 @@ def reschedule_booking_keyboard(booking_id):
         [InlineKeyboardButton(text="Перенести эту запись", callback_data=f"reschedule_{booking_id}")]
     ])
     return inline_kb
+
+
+def complete_work_keyboard(booking_id: int) -> InlineKeyboardMarkup:
+    """
+    Создаёт клавиатуру с кнопкой для завершения работы.
+    """
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Завершить эту работу", callback_data=f"complete_{booking_id}")]
+    ])
+    return keyboard

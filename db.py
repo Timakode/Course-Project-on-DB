@@ -416,3 +416,14 @@ async def delete_booking(booking_id):
         await db.commit()
 
 
+async def complete_booking(booking_id: int):
+    """
+    Обновляет статус записи на 'завершено'.
+    """
+    async with aiosqlite.connect("users.db") as db:
+        await db.execute("""
+            UPDATE bookings
+            SET status = ?
+            WHERE id = ?
+        """, ('завершено', booking_id))
+        await db.commit()
