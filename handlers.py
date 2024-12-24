@@ -749,6 +749,123 @@ async def select_new_date_callback(call: CallbackQuery, state: FSMContext):
     await call.message.edit_reply_markup()
 
 
+@router.message(lambda message: message.text == "Статистика")
+async def show_statistics(message: types.Message, state: FSMContext):
+    total_bookings = await get_total_bookings()
+    completed_bookings = await get_completed_bookings()
+    cancelled_bookings = await get_cancelled_bookings()
+
+    response = (
+        f"Общая статистика:\n"
+        f"Всего записей: {total_bookings}\n"
+        f"Завершено: {completed_bookings}\n"
+        f"Отменено: {cancelled_bookings}\n"
+    )
+
+    await message.answer(response, reply_markup=keyboard.stats_kb)
+    await state.set_state(States.search_start)
+
+
+@router.message(States.search_start)
+async def booking_start(message: Message, state: FSMContext):
+    if message.text.lower() == "по диапазону дат":
+        await message.answer("Введите начальную дату (ГГГГ-ММ-ДД):")
+        await state.set_state(States.start_date)
+    elif message.text.lower() == "по номеру авто":
+        await message.answer("Введите номер автомобиля:")
+        await state.set_state(States.car_number)
+    elif message.text.lower() == "частое авто":
+        most_frequent_car = await get_most_frequent_car()
+        if most_frequent_car:
+            response = f"Самое частое авто: {most_frequent_car[0]} ({most_frequent_car[1]} раз)"
+        else:
+            response = "Нет данных о записях."
+
+        await message.answer(response, reply_markup=keyboard.stats_kb)
+        await state.search_start()
+    else:
+        await state.clear()
+
+
+@router.message(States.start_date)
+async def process_start_date(message: types.Message, state: FSMContext):
+    start_date = message.text.strip()
+    try:
+        datetime.strptime(start_date, "%Y-%m-%d")
+    except ValueError:
+        await message.answer("Неверный формат даты. Пожалуйста, введите дату в формате ГГГГ-ММ-ДД.")
+        return
+
+    await state.update_data(start_date=start_date)
+    await message.answer("Введите конечную дату (ГГГГ-ММ-ДД):")
+    await state.set_state(States.end_date)
+
+@router.message(States.end_date)
+async def process_end_date(message: types.Message, state: FSMContext):
+    end_date = message.text.strip()
+    try:
+        datetime.strptime(end_date, "%Y-%m-%d")
+    except ValueError:
+        await message.answer("Неверный формат даты. Пожалуйста, введите дату в формате ГГГГ-ММ-ДД.")
+        return
+
+    data = await state.get_data()
+    start_date = data.get("start_date")
+
+    if start_date > end_date:
+        await message.answer("Конечная дата должна быть позже начальной даты.")
+        return
+
+    bookings = await get_bookings_by_date_range(start_date, end_date)
+    total_bookings = len(bookings)
+    completed_bookings = sum(1 for booking in bookings if booking[5] == 'завершено')
+    cancelled_bookings = sum(1 for booking in bookings if booking[5] == 'отменено')
+
+    response = (
+        f"Статистика по датам с {start_date} по {end_date}:\n"
+        f"Всего записей: {total_bookings}\n"
+        f"Завершено: {completed_bookings}\n"
+        f"Отменено: {cancelled_bookings}\n"
+    )
+
+    await message.answer(response, reply_markup=keyboard.stats_kb)
+    await state.search_start()
+
+
+@router.message(States.car_number)
+async def process_car_number(message: types.Message, state: FSMContext):
+    car_number = message.text.strip()
+    bookings = await get_bookings_by_car_number(car_number)
+    total_bookings = len(bookings)
+    completed_bookings = sum(1 for booking in bookings if booking[5] == 'завершено')
+    cancelled_bookings = sum(1 for booking in bookings if booking[5] == 'отменено')
+
+    response = (
+        f"Статистика по авто {car_number}:\n"
+        f"Всего записей: {total_bookings}\n"
+        f"Завершено: {completed_bookings}\n"
+        f"Отменено: {cancelled_bookings}\n"
+    )
+
+    await message.answer(response, reply_markup=keyboard.stats_kb)
+    await state.search_start()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

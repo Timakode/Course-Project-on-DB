@@ -72,6 +72,9 @@ after_start_admin_kb = ReplyKeyboardMarkup(
         ],
         [
             KeyboardButton(text="Наши контакты"),
+            KeyboardButton(text="Статистика")
+        ],
+        [
             KeyboardButton(text="Помощь")
         ]
     ],
@@ -193,3 +196,20 @@ def complete_work_keyboard(booking_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Завершить эту работу", callback_data=f"complete_{booking_id}")]
     ])
     return keyboard
+
+
+stats_kb = ReplyKeyboardMarkup(
+    keyboard=[
+        [
+            KeyboardButton(text="По диапазону дат"),
+            KeyboardButton(text="По номеру авто"),
+            KeyboardButton(text="Частое авто")
+        ],
+        [
+            KeyboardButton(text="Назад")
+        ]
+    ],
+    resize_keyboard=True,
+    input_field_placeholder="Выберите пункт меню",
+    selective=True
+)

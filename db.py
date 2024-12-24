@@ -269,7 +269,6 @@ async def get_client_by_id(user_id: int):
     return None
 
 
-
 async def get_cars_by_client(user_id: int):
     async with aiosqlite.connect('users.db') as db:
         async with db.execute("SELECT * FROM cars WHERE user_id = ?", (user_id,)) as cursor:
@@ -404,11 +403,13 @@ async def get_scheduled_bookings():
         await cursor.close()
     return bookings
 
+
 async def get_booking_by_id(booking_id):
     async with aiosqlite.connect("users.db") as db:
         cursor = await db.execute("SELECT * FROM bookings WHERE id = ?", (booking_id,))
         booking = await cursor.fetchone()
         return booking
+
 
 async def delete_booking(booking_id):
     async with aiosqlite.connect("users.db") as db:
@@ -427,3 +428,63 @@ async def complete_booking(booking_id: int):
             WHERE id = ?
         """, ('завершено', booking_id))
         await db.commit()
+
+
+async def get_total_bookings():
+    async with aiosqlite.connect("users.db") as db:
+        cursor = await db.execute("SELECT COUNT(*) FROM bookings;")
+        total = await cursor.fetchone()
+        await cursor.close()
+        return total[0]
+
+
+async def get_completed_bookings():
+    async with aiosqlite.connect("users.db") as db:
+        cursor = await db.execute("SELECT COUNT(*) FROM bookings WHERE status = 'завершено';")
+        completed = await cursor.fetchone()
+        await cursor.close()
+        return completed[0]
+
+
+async def get_cancelled_bookings():
+    async with aiosqlite.connect("users.db") as db:
+        cursor = await db.execute("SELECT COUNT(*) FROM bookings WHERE status = 'отменено';")
+        cancelled = await cursor.fetchone()
+        await cursor.close()
+        return cancelled[0]
+
+
+async def get_bookings_by_date_range(start_date: str, end_date: str):
+    async with aiosqlite.connect("users.db") as db:
+        cursor = await db.execute("""
+            SELECT * FROM bookings
+            WHERE date BETWEEN ? AND ?;
+        """, (start_date, end_date))
+        bookings = await cursor.fetchall()
+        await cursor.close()
+        return bookings
+
+
+async def get_bookings_by_car_number(car_number: str):
+    async with aiosqlite.connect("users.db") as db:
+        cursor = await db.execute("""
+            SELECT * FROM bookings
+            WHERE car_number LIKE ?;
+        """, (car_number,))
+        bookings = await cursor.fetchall()
+        await cursor.close()
+        return bookings
+
+
+async def get_most_frequent_car():
+    async with aiosqlite.connect("users.db") as db:
+        cursor = await db.execute("""
+            SELECT car_number, COUNT(*) as count
+            FROM bookings
+            GROUP BY car_number
+            ORDER BY count DESC
+            LIMIT 1;
+        """)
+        most_frequent = await cursor.fetchone()
+        await cursor.close()
+        return most_frequent

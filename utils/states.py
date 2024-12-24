@@ -25,8 +25,10 @@ class EditProfile(StatesGroup):
     wrapped_car = State()
     repainted_car = State()
 
+
 class SearchData(StatesGroup):
     search_input = State()
+
 
 class BookingStates(StatesGroup):
     start = State()
@@ -43,3 +45,13 @@ class BookingStates(StatesGroup):
     waiting_for_new_date = State()
     select_reschedule = State()
     select_new_date = State()
+
+
+class States(StatesGroup):
+    search_start = State()
+    search_date = State()
+    search_car_number = State()
+    search_most_frequent_car = State()
+    start_date = State()
+    end_date = State()
+    car_number = State()
