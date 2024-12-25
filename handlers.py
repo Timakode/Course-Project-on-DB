@@ -816,17 +816,45 @@ async def process_end_date(message: types.Message, state: FSMContext):
         await message.answer("Конечная дата должна быть позже начальной даты.")
         return
 
-    bookings = await get_bookings_by_date_range(start_date, end_date)
-    total_bookings = len(bookings)
-    completed_bookings = sum(1 for booking in bookings if booking[5] == 'завершено')
-    cancelled_bookings = sum(1 for booking in bookings if booking[5] == 'отменено')
+    bookings, most_frequent_car = await get_bookings_by_date_range(start_date, end_date)
 
+    if not bookings:
+        await message.answer(f"За период с {start_date} по {end_date} записей не найдено.")
+        await state.finish()
+        return
+
+    # Подсчёт статусов
+    total_bookings = len(bookings)
+    planned_bookings = sum(1 for booking in bookings if booking[0] == 'запланировано')
+    in_progress_or_completed = sum(1 for booking in bookings if booking[0] in ('в работе', 'завершено'))
+    cancelled_bookings = sum(1 for booking in bookings if booking[0] == 'отменено')
+
+    # Процентные соотношения
+    planned_percentage = round(planned_bookings / total_bookings * 100, 2) if total_bookings else 0
+    in_progress_or_completed_percentage = round(in_progress_or_completed / total_bookings * 100, 2) if total_bookings else 0
+    cancelled_percentage = round(cancelled_bookings / total_bookings * 100, 2) if total_bookings else 0
+
+    # Формирование основного ответа
     response = (
         f"Статистика по датам с {start_date} по {end_date}:\n"
         f"Всего записей: {total_bookings}\n"
-        f"Завершено: {completed_bookings}\n"
-        f"Отменено: {cancelled_bookings}\n"
+        f"Запланировано: {planned_bookings} ({planned_percentage}%)\n"
+        f"В работе или завершено: {in_progress_or_completed} ({in_progress_or_completed_percentage}%)\n"
+        f"Отменено: {cancelled_bookings} ({cancelled_percentage}%)\n"
     )
+
+    # Информация о наиболее частом авто
+    if most_frequent_car and most_frequent_car[1] > 1:  # Если авто записывалось более одного раза
+        car_number, count, car_brand, car_model, owner_name, owner_phone = most_frequent_car
+        response += (
+            f"\nНаиболее частое авто за этот период:\n"
+            f"Номер: {car_number}\n"
+            f"Марка: {car_brand}\n"
+            f"Модель: {car_model}\n"
+            f"Посещений: {count}\n"
+            f"Владелец: {owner_name}\n"
+            f"Телефон: {owner_phone}\n"
+        )
 
     await message.answer(response, reply_markup=keyboard.stats_kb)
     await state.search_start()
@@ -835,38 +863,34 @@ async def process_end_date(message: types.Message, state: FSMContext):
 @router.message(States.car_number)
 async def process_car_number(message: types.Message, state: FSMContext):
     car_number = message.text.strip()
-    bookings = await get_bookings_by_car_number(car_number)
+    bookings, count_last_year, owner_name, owner_phone = await get_bookings_by_car_number(car_number)
+
+    if not bookings:
+        await message.answer(f"По авто с номером {car_number} записей не найдено.")
+        await state.clear()
+        return
+
     total_bookings = len(bookings)
     completed_bookings = sum(1 for booking in bookings if booking[5] == 'завершено')
     cancelled_bookings = sum(1 for booking in bookings if booking[5] == 'отменено')
+
+    # Формируем ответ с учётом данных о владельце
+    owner_info = (
+        f"Имя: {owner_name}\nТелефон: {owner_phone}\n"
+        if owner_name and owner_phone else "Информация о владельце недоступна.\n"
+    )
 
     response = (
         f"Статистика по авто {car_number}:\n"
         f"Всего записей: {total_bookings}\n"
         f"Завершено: {completed_bookings}\n"
         f"Отменено: {cancelled_bookings}\n"
+        f"Записей за последний год: {count_last_year}\n\n"
+        f"Информация о владельце:\n{owner_info}"
     )
 
     await message.answer(response, reply_markup=keyboard.stats_kb)
     await state.search_start()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

@@ -456,24 +456,91 @@ async def get_cancelled_bookings():
 
 async def get_bookings_by_date_range(start_date: str, end_date: str):
     async with aiosqlite.connect("users.db") as db:
+        # Основной запрос для получения записей за период
         cursor = await db.execute("""
-            SELECT * FROM bookings
-            WHERE date BETWEEN ? AND ?;
+            SELECT 
+                b.status, 
+                b.car_number,
+                c.car_brand, 
+                c.car_model, 
+                u.first_name, 
+                u.phone_number
+            FROM bookings b
+            LEFT JOIN cars c ON b.car_number = c.car_number
+            LEFT JOIN users u ON c.user_id = u.id
+            WHERE b.date BETWEEN ? AND ?
         """, (start_date, end_date))
         bookings = await cursor.fetchall()
         await cursor.close()
-        return bookings
+
+        # Подсчёт числа записей каждого авто (исключая отменённые)
+        cursor = await db.execute("""
+            SELECT 
+                b.car_number, 
+                COUNT(*) as count, 
+                c.car_brand, 
+                c.car_model, 
+                u.first_name, 
+                u.phone_number
+            FROM bookings b
+            LEFT JOIN cars c ON b.car_number = c.car_number
+            LEFT JOIN users u ON c.user_id = u.id
+            WHERE b.date BETWEEN ? AND ? AND b.status IN ('запланировано', 'в работе', 'завершено')
+            GROUP BY b.car_number
+            ORDER BY count DESC
+            LIMIT 1
+        """, (start_date, end_date))
+        most_frequent_car = await cursor.fetchone()
+        await cursor.close()
+
+        return bookings, most_frequent_car
 
 
 async def get_bookings_by_car_number(car_number: str):
+    one_year_ago = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
     async with aiosqlite.connect("users.db") as db:
+        # Основной запрос для получения записей
         cursor = await db.execute("""
-            SELECT * FROM bookings
-            WHERE car_number LIKE ?;
-        """, (car_number,))
+                SELECT 
+                    b.*,
+                    u.first_name,
+                    u.phone_number
+                FROM bookings b
+                LEFT JOIN cars c ON b.car_number = c.car_number
+                LEFT JOIN users u ON c.user_id = u.id
+                WHERE b.car_number LIKE ?
+            """, (car_number,))
         bookings = await cursor.fetchall()
+
+        # Подсчитываем записи за последний год (исключая отменённые)
+        cursor = await db.execute("""
+                SELECT COUNT(*)
+                FROM bookings
+                WHERE car_number LIKE ? 
+                  AND status IN ('запланировано', 'в работе', 'завершено') 
+                  AND date >= ?
+            """, (car_number, one_year_ago))
+        count_last_year = (await cursor.fetchone())[0]
         await cursor.close()
-        return bookings
+
+        # Если записей нет, возвращаем пустые значения
+        if not bookings:
+            return [], count_last_year, None, None
+
+        # Извлекаем данные о владельце из таблицы users через cars.user_id
+        cursor = await db.execute("""
+                SELECT u.first_name, u.phone_number
+                FROM users u
+                JOIN cars c ON u.id = c.user_id
+                WHERE c.car_number LIKE ?
+            """, (car_number,))
+        owner = await cursor.fetchone()
+        await cursor.close()
+
+        owner_name = owner[0] if owner else None
+        owner_phone = owner[1] if owner else None
+
+        return bookings, count_last_year, owner_name, owner_phone
 
 
 async def get_most_frequent_car():
@@ -488,3 +555,8 @@ async def get_most_frequent_car():
         most_frequent = await cursor.fetchone()
         await cursor.close()
         return most_frequent
+
+
+
+
+

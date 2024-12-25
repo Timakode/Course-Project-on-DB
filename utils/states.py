@@ -49,9 +49,10 @@ class BookingStates(StatesGroup):
 
 class States(StatesGroup):
     search_start = State()
-    search_date = State()
-    search_car_number = State()
-    search_most_frequent_car = State()
     start_date = State()
     end_date = State()
     car_number = State()
+    car_brand = State()
+    date = State()
+    pattern = State()
+    telegram_ids = State()
