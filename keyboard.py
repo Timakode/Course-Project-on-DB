@@ -206,6 +206,11 @@ stats_kb = ReplyKeyboardMarkup(
             KeyboardButton(text="Частое авто")
         ],
         [
+            KeyboardButton(text="Записи по марке"),
+            #KeyboardButton(text="По номеру авто"),
+            #KeyboardButton(text="Частое авто")
+        ],
+        [
             KeyboardButton(text="Назад")
         ]
     ],

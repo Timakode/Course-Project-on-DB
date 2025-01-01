@@ -16,14 +16,13 @@ from aiogram.fsm.context import FSMContext
 from utils.states import *
 from aiogram.utils.markdown import hlink
 
-
 router = Router()
 
 admin_ids = list(map(int, config('ADMINS').split(',')))
 phone_number = None
 
 @router.message(CommandStart())
-async def start_command(message:Message) -> None:
+async def start_command(message: Message) -> None:
     telegram_id = message.from_user.id
     user_data = await get_user_by_id(telegram_id)
     if user_data:
@@ -46,59 +45,49 @@ async def start_command(message:Message) -> None:
             await message.answer(f"<b>{message.from_user.first_name}</b>\nДетейлинг студия {'818'} приветствует вас!",
                                  reply_markup=keyboard.after_start_kb)
 
-
-
 @router.message(Command('help'))
 @router.message(F.text.lower() == "помощь")
-async def help_command(message:Message) -> None:
+async def help_command(message: Message) -> None:
     await message.answer(f"""Список команд, доступных в боте:\n/start - запуск бота\n/help - помощь""")
 
-
 @router.message(F.text.lower() == "регистрация")
-async def registration(message:Message, state: FSMContext) -> None:
+async def registration(message: Message, state: FSMContext) -> None:
     global phone_number
-
 
     await message.answer("Пожалуйста, введите Ваш номер телефона в формате +79491234567")
     await state.set_state(UserData.phone)
 
-
-
 @router.message(UserData.phone)
-async def form_phone(message:Message, state:FSMContext):
+async def form_phone(message: Message, state: FSMContext):
     # Проверка формата номера телефона (например, +71234567890)
     phone_pattern = re.compile(r"^\+?\d{11,15}$")
     phone_number = message.text
 
     user_data = await get_user_by_phone(phone_number)
     if user_data is not None:
-        await state.clear()  # Завершение стейта
+        await state.clear()  # Завершение состояния
         await message.answer(f"Клиент с таким номером уже зарегистрирован",
                              reply_markup=keyboard.after_start_kb)
         return
 
     if phone_pattern.match(phone_number):
-        await state.update_data(phone=phone_number)
+        await state.update_data(phone=phone_number.lower())
         await message.answer(f"Номер телефона {phone_number} сохранён")
 
         await state.set_state(UserData.name)
         await message.answer("Пожалуйста, введите Ваше имя")
     else:
-        await message.answer("Номер телефона введен неверно, попробуйте ещё раз")
+        await message.answer("Номер телефона введён неверно, попробуйте ещё раз")
         await registration_admin(message, state)
-
-
-
-
 
 @router.message(UserData.name)
 async def form_name(message: Message, state: FSMContext):
     telegram_id = message.from_user.id
     user_data = await get_user_by_id(telegram_id)
 
-    await state.update_data(name=message.text)
+    await state.update_data(name=message.text.lower())
     data = await state.get_data()
-    await state.clear()  # Завершение стейта
+    await state.clear()  # Завершение состояния
     first_name = data.get("name")
     phone_number = data.get("phone")
 
@@ -124,14 +113,12 @@ async def form_name(message: Message, state: FSMContext):
         await message.answer(f"Поздравляю, {db_name}, регистрация прошла успешно!",
                              reply_markup=keyboard.after_start_kb)
 
-
 @router.message(lambda message: message.text.lower() == "назад")
 async def back_to_main_menu(message: Message, state: FSMContext):
     # Очищаем текущее состояние
     await state.clear()
     # Возвращаем пользователя в главное меню
     await message.answer("Вы вернулись в главное меню.", reply_markup=keyboard.after_start_admin_kb)
-
 
 @router.message(F.text.lower() == "зарегистрировать клиента")
 async def registration_admin(message: Message, state: FSMContext):
@@ -141,32 +128,31 @@ async def registration_admin(message: Message, state: FSMContext):
     await state.set_state(UserDataforAdmin.phone)
 
 @router.message(UserDataforAdmin.phone)
-async def form_phone_admin(message:Message, state:FSMContext):
+async def form_phone_admin(message: Message, state: FSMContext):
     # Проверка формата номера телефона (например, +71234567890)
     phone_pattern = re.compile(r"^\+?\d{11,15}$")
     phone_number = message.text
 
     user_data = await get_user_by_phone(phone_number)
     if user_data is not None:
-        await state.clear()  # Завершение стейта
+        await state.clear()  # Завершение состояния
         await message.answer(f"Клиент с таким номером уже зарегистрирован",
                              reply_markup=keyboard.after_start_admin_kb)
         return
 
     if phone_pattern.match(phone_number):
-        await state.update_data(phone=phone_number)
+        await state.update_data(phone=phone_number.lower())
         await message.answer(f"Номер телефона клиента {phone_number} сохранён")
 
         await state.set_state(UserDataforAdmin.name)
         await message.answer("Пожалуйста, введите имя Клиента")
     else:
-        await message.answer("Номер телефона введен неверно, попробуйте ещё раз")
+        await message.answer("Номер телефона введён неверно, попробуйте ещё раз")
         await registration_admin(message, state)
-
 
 @router.message(UserDataforAdmin.name)
 async def form_name_admin(message: Message, state: FSMContext):
-    first_name = message.text
+    first_name = message.text.lower()
     data = await state.get_data()
     phone_number = data.get("phone")
 
@@ -183,12 +169,10 @@ async def form_name_admin(message: Message, state: FSMContext):
     await message.answer(f"Поздравляю, регистрация Клиента прошла успешно!",
                         reply_markup=keyboard.after_start_admin_kb)
 
-
 @router.message(F.text.lower() == "редактировать профиль")
 async def editProfile(message: Message, state: FSMContext):
     await message.answer(f"Что Вы хотите изменить?", reply_markup=keyboard.edit_kb)
     await state.set_state(EditProfile.start)
-
 
 @router.message(EditProfile.start)
 async def editorStart(message: Message, state: FSMContext):
@@ -226,7 +210,7 @@ async def editPhone(message: Message, state: FSMContext):
 
     # Проверка формата номера телефона (например, +71234567890)
     phone_pattern = re.compile(r"^\+?\d{11,15}$")
-    phone_number = message.text
+    phone_number = message.text.lower()
 
     telegram_id = message.from_user.id
     user = await get_user_by_id(telegram_id)
@@ -242,22 +226,20 @@ async def editPhone(message: Message, state: FSMContext):
         await db.update_phone(old_phone_number, phone_number)
 
         if telegram_id in admin_ids:
-            await message.answer(f"Номер телефона успешно обновлен. Новый номер: {phone_number}",
+            await message.answer(f"Номер телефона успешно обновлён. Новый номер: {phone_number}",
                                  reply_markup=keyboard.after_start_admin_kb)
         else:
-            await message.answer(f"Номер телефона успешно обновлен. Новый номер: {phone_number}",
+            await message.answer(f"Номер телефона успешно обновлён. Новый номер: {phone_number}",
                                  reply_markup=keyboard.after_start_kb)
 
         await state.clear()
     else:
-        await message.answer("Номер телефона введен неверно, попробуйте ещё раз")
+        await message.answer("Номер телефона введён неверно, попробуйте ещё раз")
         await editPhone(message, state)
-
-
 
 @router.message(EditProfile.addAuto)
 async def car_number(message: Message, state: FSMContext):
-    car_number = message.text
+    car_number = message.text.lower()
 
     car = await get_car_by_number(car_number)
     if car is not None:
@@ -278,7 +260,7 @@ async def car_number(message: Message, state: FSMContext):
 
 @router.message(EditProfile.car_brand)
 async def car_brand(message: Message, state: FSMContext):
-    car_brand = message.text
+    car_brand = message.text.lower()
     await state.update_data(car_brand=car_brand)
 
     await state.set_state(EditProfile.car_model)
@@ -286,7 +268,7 @@ async def car_brand(message: Message, state: FSMContext):
 
 @router.message(EditProfile.car_model)
 async def car_model(message: Message, state: FSMContext):
-    car_model = message.text
+    car_model = message.text.lower()
     await state.update_data(car_model=car_model)
 
     await state.set_state(EditProfile.car_year)
@@ -294,7 +276,7 @@ async def car_model(message: Message, state: FSMContext):
 
 @router.message(EditProfile.car_year)
 async def car_year(message: Message, state: FSMContext):
-    car_year = message.text
+    car_year = message.text.lower()
     await state.update_data(car_year=car_year)
 
     await state.set_state(EditProfile.car_color)
@@ -302,15 +284,14 @@ async def car_year(message: Message, state: FSMContext):
 
 @router.message(EditProfile.car_color)
 async def car_color(message: Message, state: FSMContext):
-    car_color = message.text
+    car_color = message.text.lower()
     await state.update_data(car_color=car_color)
 
     await state.set_state(EditProfile.wrapped_car)
     await message.answer(
-        "Выберите, оклеен ли авто пленкой:",
+        "Выберите, оклеен ли авто плёнкой:",
         reply_markup=keyboard.wrap_car_kb()
     )
-
 
 @router.callback_query(StateFilter(EditProfile.wrapped_car))
 async def wrapped_car_callback(call: CallbackQuery, state: FSMContext):
@@ -328,7 +309,6 @@ async def wrapped_car_callback(call: CallbackQuery, state: FSMContext):
         reply_markup=keyboard.repaint_car_kb()
     )
     await call.answer()
-
 
 # Обработчик для выбора, есть ли крашеные элементы
 @router.callback_query(StateFilter(EditProfile.repainted_car))
@@ -377,13 +357,11 @@ async def repainted_car_callback(call: CallbackQuery, state: FSMContext):
                                    reply_markup=keyboard.after_start_kb)
     await call.answer()
 
-
 @router.message(F.text.lower() == "поиск")
 async def search_handler(message: types.Message, state: FSMContext):
     await state.set_state(SearchData.search_input)
     await message.answer("Введите номер телефона в формате +79491234567 или номер автомобиля:",
                          reply_markup=keyboard.user_reg_kb)
-
 
 @router.message(SearchData.search_input)
 async def process_input(message: types.Message, state: FSMContext):
@@ -405,7 +383,7 @@ async def process_input(message: types.Message, state: FSMContext):
         else:
             await message.answer("Пользователь не найден.")
 
-    elif len(user_input) > 0:  # Предположим, что номер автомобиля не пустой
+    elif len(user_input) > 0:  # Предполагаем, что номер автомобиля не пустой
         car_info = await get_car_and_owner_by_number(user_input)
         if car_info:
             response = f"Автомобиль найден:\n" \
@@ -425,12 +403,10 @@ async def process_input(message: types.Message, state: FSMContext):
 
     await state.clear()  # Завершаем состояние после обработки ввода
 
-
 @router.message(F.text.lower() == "запись")
 async def book_handler(message: Message, state: FSMContext):
     await message.answer("Выберите действие", reply_markup=keyboard.sign_up_kb)
     await state.set_state(BookingStates.start)
-
 
 @router.message(BookingStates.start)
 async def booking_start(message: Message, state: FSMContext):
@@ -528,7 +504,6 @@ async def booking_start(message: Message, state: FSMContext):
 
             await message.answer(message_text, reply_markup=keyboard.after_start_admin_kb)
 
-
 @router.callback_query(StateFilter(BookingStates.select_date))
 async def select_date_callback(call: CallbackQuery, state: FSMContext):
     date = call.data.split("_")[1]
@@ -536,12 +511,11 @@ async def select_date_callback(call: CallbackQuery, state: FSMContext):
     await call.message.answer("Введите номер телефона или номер автомобиля:")
     await state.set_state(BookingStates.input_client_data)
 
-
 @router.message(BookingStates.input_client_data)
 async def input_client_data(message: Message, state: FSMContext):
     user_input = message.text.strip()
 
-    phone_pattern = re.compile(r"^\+?\d{10,15}$")  # Шаблон для номера телефона
+    phone_pattern = re.compile(r"^\+?\d{11,15}$")  # Шаблон для номера телефона
 
     if phone_pattern.match(user_input):
         client_info = await get_client_and_cars_by_phone(user_input)
@@ -552,7 +526,7 @@ async def input_client_data(message: Message, state: FSMContext):
                 await message.answer("У вас нет добавленных автомобилей. Пожалуйста, добавьте автомобиль.",
                                      reply_markup=keyboard.after_start_admin_kb)
                 await state.clear()
-                #await state.set_state(EditProfile.addAuto)
+                # await state.set_state(EditProfile.addAuto)
                 return
 
             # Формируем клавиатуру с номерами автомобилей
@@ -573,7 +547,7 @@ async def input_client_data(message: Message, state: FSMContext):
             await message.answer("Пользователь не найден. Пожалуйста, зарегистрируйтесь.",
                                  reply_markup=keyboard.after_start_admin_kb)
             await state.clear()
-            #await state.set_state(UserData.phone)
+            # await state.set_state(UserData.phone)
 
     elif len(user_input) > 0:  # Обработка номера автомобиля
         car_info = await get_car_and_owner_by_number(user_input)
@@ -591,7 +565,7 @@ async def input_client_data(message: Message, state: FSMContext):
                        f"Телефон: {owner['phone_number']}\n"
             await message.answer(response)
 
-            await state.update_data(car_number=user_input, client_id=owner["id"])
+            await state.update_data(car_number=user_input.lower(), client_id=owner["id"])
             await message.answer("Введите описание услуги:")
             await state.set_state(BookingStates.input_service)
         else:
@@ -601,7 +575,6 @@ async def input_client_data(message: Message, state: FSMContext):
         await message.answer("Некорректный ввод. Пожалуйста, введите номер телефона или номер автомобиля.")
         await state.clear()  # Завершаем состояние после некорректного ввода
 
-
 @router.callback_query(StateFilter(BookingStates.select_car))
 async def select_car_callback(call: CallbackQuery, state: FSMContext):
     car_number = call.data.split("_")[1]
@@ -609,10 +582,9 @@ async def select_car_callback(call: CallbackQuery, state: FSMContext):
     await call.message.answer("Введите описание услуги:")
     await state.set_state(BookingStates.input_service)
 
-
 @router.message(BookingStates.input_service)
 async def input_service(message: Message, state: FSMContext):
-    service_description = message.text.strip()  # Описание услуги
+    service_description = message.text.strip().lower()  # Описание услуги
     data = await state.get_data()
 
     # Получаем данные из состояния
@@ -657,7 +629,6 @@ async def input_service(message: Message, state: FSMContext):
     else:
         await message.answer("Произошла ошибка. Пожалуйста, попробуйте снова.")
 
-
 @router.callback_query(BookingStates.complete_work)
 async def complete_work_selection(callback_query: CallbackQuery, state: FSMContext):
     data = callback_query.data
@@ -676,7 +647,6 @@ async def complete_work_selection(callback_query: CallbackQuery, state: FSMConte
     else:
         await callback_query.message.answer("Некорректный выбор.", reply_markup=keyboard.after_start_admin_kb)
 
-
 @router.callback_query(BookingStates.cancel)
 async def booking_cancel_selection(callback_query: CallbackQuery, state: FSMContext):
     data = callback_query.data
@@ -694,7 +664,6 @@ async def booking_cancel_selection(callback_query: CallbackQuery, state: FSMCont
         await state.clear()
     else:
         await callback_query.message.answer("Некорректный выбор.", reply_markup=keyboard.after_start_admin_kb)
-
 
 # Обработчик для выбора записи для переноса
 @router.callback_query(StateFilter(BookingStates.select_reschedule))
@@ -748,8 +717,7 @@ async def select_new_date_callback(call: CallbackQuery, state: FSMContext):
     await state.clear()
     await call.message.edit_reply_markup()
 
-
-@router.message(lambda message: message.text == "Статистика")
+@router.message(F.text.lower() == "статистика")
 async def show_statistics(message: types.Message, state: FSMContext):
     total_bookings = await get_total_bookings()
     completed_bookings = await get_completed_bookings()
@@ -765,27 +733,31 @@ async def show_statistics(message: types.Message, state: FSMContext):
     await message.answer(response, reply_markup=keyboard.stats_kb)
     await state.set_state(States.search_start)
 
-
 @router.message(States.search_start)
 async def booking_start(message: Message, state: FSMContext):
     if message.text.lower() == "по диапазону дат":
         await message.answer("Введите начальную дату (ГГГГ-ММ-ДД):")
         await state.set_state(States.start_date)
+
     elif message.text.lower() == "по номеру авто":
         await message.answer("Введите номер автомобиля:")
         await state.set_state(States.car_number)
+
     elif message.text.lower() == "частое авто":
         most_frequent_car = await get_most_frequent_car()
         if most_frequent_car:
             response = f"Самое частое авто: {most_frequent_car[0]} ({most_frequent_car[1]} раз)"
         else:
             response = "Нет данных о записях."
-
         await message.answer(response, reply_markup=keyboard.stats_kb)
-        await state.search_start()
+        await state.set_state(States.search_start)
+
+    elif message.text.lower() == "записи по марке":
+        await message.answer("Введите марки автомобилей через запятую:")
+        await state.set_state(States.waiting_for_car_brands)
+
     else:
         await state.clear()
-
 
 @router.message(States.start_date)
 async def process_start_date(message: types.Message, state: FSMContext):
@@ -820,7 +792,7 @@ async def process_end_date(message: types.Message, state: FSMContext):
 
     if not bookings:
         await message.answer(f"За период с {start_date} по {end_date} записей не найдено.")
-        await state.finish()
+        await state.clear()
         return
 
     # Подсчёт статусов
@@ -857,12 +829,11 @@ async def process_end_date(message: types.Message, state: FSMContext):
         )
 
     await message.answer(response, reply_markup=keyboard.stats_kb)
-    await state.search_start()
-
+    await state.set_state(States.search_start)
 
 @router.message(States.car_number)
 async def process_car_number(message: types.Message, state: FSMContext):
-    car_number = message.text.strip()
+    car_number = message.text.strip().lower()
     bookings, count_last_year, owner_name, owner_phone = await get_bookings_by_car_number(car_number)
 
     if not bookings:
@@ -890,10 +861,24 @@ async def process_car_number(message: types.Message, state: FSMContext):
     )
 
     await message.answer(response, reply_markup=keyboard.stats_kb)
-    await state.search_start()
+    await state.set_state(States.search_start)
 
 
+@router.message(States.waiting_for_car_brands)
+async def process_car_brands(message: Message, state: FSMContext):
+    car_brands = [brand.strip().lower() for brand in message.text.split(',')]
+    bookings = await get_bookings_by_brand(car_brands)
 
+    if bookings:
+        response = "Записи на ближайший месяц:\n"
+        for booking in bookings:
+            response += f"ID: {booking[0]}, Номер авто: {booking[1]}, Дата: {booking[2]}, Пост: {booking[3]}, Описание: {booking[4]}, Статус: {booking[5]}\n"
+    else:
+        response = "Нет записей для указанных марок автомобилей на ближайший месяц."
+
+    await state.clear()
+    await message.answer(response, reply_markup=keyboard.stats_kb)
+    await state.set_state(States.search_start)
 
 
 
@@ -901,7 +886,7 @@ async def process_car_number(message: types.Message, state: FSMContext):
 
 
 @router.message(F.text.lower() == "наши контакты")
-async def registration(message:Message) -> None:
+async def registration(message: Message) -> None:
     text1 = hlink('VKontakte', 'https://vk.com/studia818')
     text2 = hlink('TikTok', 'https://www.tiktok.com/@studia818')
     text3 = hlink('Instagram', 'https://www.instagram.com/studia.818?igsh=ZHE0ZmI2d2FpMnJn')
@@ -909,10 +894,10 @@ async def registration(message:Message) -> None:
     photo_path = "D:/Programming/TGBot/818_logo.jpg"
 
     await message.answer_photo(photo=FSInputFile(photo_path),
-                               caption=text1+'\n'+text2+'\n'+text3,
+                               caption=text1 + '\n' + text2 + '\n' + text3,
                                disable_web_page_preview=True)
 
-
 @router.message()
-async def dont_understand(message:Message) -> None:
+async def dont_understand(message: Message) -> None:
     await message.answer(f"Я не могу распознать данную команду или текст")
+

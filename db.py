@@ -458,16 +458,16 @@ async def get_bookings_by_date_range(start_date: str, end_date: str):
     async with aiosqlite.connect("users.db") as db:
         # Основной запрос для получения записей за период
         cursor = await db.execute("""
-            SELECT 
-                b.status, 
+            SELECT
+                b.status,
                 b.car_number,
-                c.car_brand, 
-                c.car_model, 
-                u.first_name, 
+                c.car_brand,
+                c.car_model,
+                u.first_name,
                 u.phone_number
             FROM bookings b
-            LEFT JOIN cars c ON b.car_number = c.car_number
-            LEFT JOIN users u ON c.user_id = u.id
+            INNER JOIN cars c ON b.car_number = c.car_number
+            INNER JOIN users u ON c.user_id = u.id
             WHERE b.date BETWEEN ? AND ?
         """, (start_date, end_date))
         bookings = await cursor.fetchall()
@@ -475,16 +475,16 @@ async def get_bookings_by_date_range(start_date: str, end_date: str):
 
         # Подсчёт числа записей каждого авто (исключая отменённые)
         cursor = await db.execute("""
-            SELECT 
-                b.car_number, 
-                COUNT(*) as count, 
-                c.car_brand, 
-                c.car_model, 
-                u.first_name, 
+            SELECT
+                b.car_number,
+                COUNT(*) as count,
+                c.car_brand,
+                c.car_model,
+                u.first_name,
                 u.phone_number
             FROM bookings b
-            LEFT JOIN cars c ON b.car_number = c.car_number
-            LEFT JOIN users u ON c.user_id = u.id
+            INNER JOIN cars c ON b.car_number = c.car_number
+            INNER JOIN users u ON c.user_id = u.id
             WHERE b.date BETWEEN ? AND ? AND b.status IN ('запланировано', 'в работе', 'завершено')
             GROUP BY b.car_number
             ORDER BY count DESC
@@ -543,7 +543,7 @@ async def get_bookings_by_car_number(car_number: str):
         return bookings, count_last_year, owner_name, owner_phone
 
 
-async def get_most_frequent_car():
+async def get_most_frequent_car(): # запрос с функцией агрегирования
     async with aiosqlite.connect("users.db") as db:
         cursor = await db.execute("""
             SELECT car_number, COUNT(*) as count
@@ -557,6 +557,14 @@ async def get_most_frequent_car():
         return most_frequent
 
 
-
-
-
+async def get_bookings_by_brand(car_brands):
+    async with aiosqlite.connect('users.db') as db:
+        query = """
+            SELECT bookings.id, bookings.car_number, bookings.date, bookings.post_number, bookings.service_description, bookings.status
+            FROM bookings
+            INNER JOIN cars ON bookings.car_number = cars.car_number
+            WHERE cars.car_brand IN ({})
+            AND bookings.date BETWEEN date('now') AND date('now', '+1 month')
+        """.format(','.join('?' * len(car_brands)))
+        async with db.execute(query, car_brands) as cursor:
+            return await cursor.fetchall()

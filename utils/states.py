@@ -56,3 +56,4 @@ class States(StatesGroup):
     date = State()
     pattern = State()
     telegram_ids = State()
+    waiting_for_car_brands = State()
