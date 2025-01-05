@@ -717,6 +717,7 @@ async def select_new_date_callback(call: CallbackQuery, state: FSMContext):
     await state.clear()
     await call.message.edit_reply_markup()
 
+
 @router.message(F.text.lower() == "статистика")
 async def show_statistics(message: types.Message, state: FSMContext):
     total_bookings = await get_total_bookings()
