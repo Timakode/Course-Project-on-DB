@@ -27,7 +27,8 @@ admin_start_kb = ReplyKeyboardMarkup(
             KeyboardButton(text="Наши контакты")
         ],
         [
-            KeyboardButton(text="Админская кнопка")  # Дополнительная кнопка
+            KeyboardButton(text="Генерация данных"),
+            KeyboardButton(text="Удаление данных")# Дополнительная кнопка
         ]
     ],
     resize_keyboard=True,
@@ -73,6 +74,9 @@ after_start_admin_kb = ReplyKeyboardMarkup(
         [
             KeyboardButton(text="Наши контакты"),
             KeyboardButton(text="Статистика")
+        ],
+        [
+            KeyboardButton(text="Удаление данных")
         ],
         [
             KeyboardButton(text="Помощь")
@@ -164,9 +168,14 @@ def repaint_car_kb():
 
 
 def get_booking_keyboard(free_dates):
-    # Генерация инлайн-клавиатуры с кнопками на каждую дату
-    buttons = [InlineKeyboardButton(text=date, callback_data=f"book_date:{date}") for date in free_dates]
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[buttons[i:i + 3] for i in range(0, len(buttons), 3)])
+    buttons = []
+    for i in range(0, len(free_dates), 3):
+        row = []
+        for date in free_dates[i:i+3]:
+            row.append(InlineKeyboardButton(text=date.strftime("%Y-%m-%d"), callback_data=f"book_date:{date.strftime('%Y-%m-%d')}"))
+        buttons.append(row)
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
     return keyboard
 
 

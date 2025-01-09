@@ -1,10 +1,17 @@
 import asyncpg
 from decouple import config
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import logging
+from faker import Faker
+import random
+
+
+# Инициализация Faker
+fake = Faker('ru_RU')
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
+
 
 # Загрузка параметров подключения из файла .env
 DB_USER = config('DB_USER')
@@ -121,18 +128,19 @@ async def update_phone(old_phone_number: str, new_phone_number: str):
     finally:
         await conn.close()
 
-async def add_car(car_number: str, user_id: int, car_brand: str, car_model: str, car_year: int, car_color: str, wrapped_car: str, repainted_car: str):
+async def add_car(car_number: str, user_id: int, car_brand: str, car_model: str, car_year: str, car_color: str, wrapped_car: str, repainted_car: str):
     try:
         conn = await asyncpg.connect(user=DB_USER, password=DB_PASSWORD, database=DB_NAME, host=DB_HOST, port=DB_PORT)
         await conn.execute("""
             INSERT INTO cars (user_id, car_number, car_brand, car_model, car_year, car_color, wrapped_car, repainted_car)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             ON CONFLICT(car_number) DO NOTHING
-        """, user_id, car_number, car_brand, car_model, car_year, car_color, wrapped_car, repainted_car)
+        """, user_id, car_number, car_brand, car_model, int(car_year), car_color, wrapped_car, repainted_car)
     except Exception as e:
         logging.error(f"Error while adding car: {e}")
     finally:
         await conn.close()
+
 
 async def get_car_by_number(car_number: str):
     conn = await asyncpg.connect(user=DB_USER, password=DB_PASSWORD, database=DB_NAME, host=DB_HOST, port=DB_PORT)
@@ -240,17 +248,17 @@ async def get_car_and_owner_by_number(car_number: str):
 async def get_available_dates():
     conn = await asyncpg.connect(user=DB_USER, password=DB_PASSWORD, database=DB_NAME, host=DB_HOST, port=DB_PORT)
     try:
-        today = datetime.now()
+        today = datetime.now().date()
         free_dates = []
 
         for i in range(30):
-            date = (today + timedelta(days=i)).strftime("%Y-%m-%d")
+            date_obj = today + timedelta(days=i)
             count = await conn.fetchval("""
                 SELECT COUNT(DISTINCT post_number) FROM bookings WHERE date = $1
-            """, date)
+            """, date_obj)
 
             if count < 5:
-                free_dates.append(date)
+                free_dates.append(date_obj)
 
         return free_dates
     finally:
@@ -276,7 +284,7 @@ async def get_cars_by_client(user_id: int):
     finally:
         await conn.close()
 
-async def add_booking(booking_date, car_number, client_id, service_description):
+async def add_booking(booking_date: date, car_number: str, client_id: int, service_description: str):
     conn = await asyncpg.connect(user=DB_USER, password=DB_PASSWORD, database=DB_NAME, host=DB_HOST, port=DB_PORT)
     try:
         taken_posts = await conn.fetch("""
@@ -298,6 +306,7 @@ async def add_booking(booking_date, car_number, client_id, service_description):
         return True
     finally:
         await conn.close()
+
 
 async def get_active_bookings():
     query = """
@@ -438,7 +447,7 @@ async def get_cancelled_bookings():
     finally:
         await conn.close()
 
-async def get_bookings_by_date_range(start_date: str, end_date: str):
+async def get_bookings_by_date_range(start_date: date, end_date: date):
     conn = await asyncpg.connect(user=DB_USER, password=DB_PASSWORD, database=DB_NAME, host=DB_HOST, port=DB_PORT)
     try:
         bookings = await conn.fetch("""
@@ -477,7 +486,7 @@ async def get_bookings_by_date_range(start_date: str, end_date: str):
         await conn.close()
 
 async def get_bookings_by_car_number(car_number: str):
-    one_year_ago = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+    one_year_ago = (datetime.now() - timedelta(days=365)).date()
     conn = await asyncpg.connect(user=DB_USER, password=DB_PASSWORD, database=DB_NAME, host=DB_HOST, port=DB_PORT)
     try:
         bookings = await conn.fetch("""
@@ -530,6 +539,7 @@ async def get_most_frequent_car():
     finally:
         await conn.close()
 
+
 async def get_bookings_by_brand(car_brands):
     conn = await asyncpg.connect(user=DB_USER, password=DB_PASSWORD, database=DB_NAME, host=DB_HOST, port=DB_PORT)
     try:
@@ -542,5 +552,101 @@ async def get_bookings_by_brand(car_brands):
         """
         bookings = await conn.fetch(query, car_brands)
         return bookings
+    finally:
+        await conn.close()
+
+
+
+
+
+
+
+
+
+
+async def generate_fake_data():
+    conn = await asyncpg.connect(user=DB_USER, password=DB_PASSWORD, database=DB_NAME, host=DB_HOST, port=DB_PORT)
+    try:
+        # Генерация пользователей
+        users = []
+        unique_telegram_ids = set()
+        unique_phone_numbers = set()
+
+        while len(users) < 10000:
+            telegram_id = fake.random_int(min=100000000, max=999999999)
+            phone_number = f"+7{fake.random_int(min=9000000000, max=9999999999)}"
+
+            if telegram_id not in unique_telegram_ids and phone_number not in unique_phone_numbers:
+                unique_telegram_ids.add(telegram_id)
+                unique_phone_numbers.add(phone_number)
+                username = fake.user_name()
+                first_name = fake.first_name()
+                users.append((telegram_id, username, first_name, phone_number))
+
+        await conn.executemany("""
+            INSERT INTO users (telegram_id, username, first_name, phone_number)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (phone_number) DO NOTHING
+        """, users)
+
+        # Получение всех user_id
+        user_ids = await conn.fetch("SELECT id FROM users")
+        user_ids = [user['id'] for user in user_ids]
+
+        # Генерация автомобилей
+        cars = []
+        unique_car_numbers = set()
+
+        for user_id in user_ids:
+            car_number = fake.license_plate()
+
+            if car_number not in unique_car_numbers:
+                unique_car_numbers.add(car_number)
+                car_brand = fake.company()
+                car_model = fake.word()
+                car_year = fake.random_int(min=1990, max=2023)
+                car_color = fake.color_name()
+                wrapped_car = random.choice(["Полностью", "Частично", "Нет"])
+                repainted_car = random.choice(["Да", "Нет"])
+                cars.append((user_id, car_number, car_brand, car_model, car_year, car_color, wrapped_car, repainted_car))
+
+        await conn.executemany("""
+            INSERT INTO cars (user_id, car_number, car_brand, car_model, car_year, car_color, wrapped_car, repainted_car)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (car_number) DO NOTHING
+        """, cars)
+
+        # Генерация записей
+        bookings = []
+        today = datetime.now().date()
+
+        for car_number in unique_car_numbers:
+            for _ in range(random.randint(1, 5)):  # Генерируем от 1 до 5 записей для каждого автомобиля
+                date = today + timedelta(days=random.randint(0, 30))  # Записи на месяц вперед
+                post_number = random.randint(1, 5)
+                service_description = random.choice(["Химчистка", "Тонировка", "Оклейка", "Полировка", "Мойка"])
+
+                # Проверка наличия записи перед вставкой
+                existing_booking = await conn.fetchrow("""
+                    SELECT 1 FROM bookings WHERE car_number = $1 AND date = $2
+                """, car_number, date)
+
+                if not existing_booking:
+                    bookings.append((car_number, date, post_number, service_description))
+
+        await conn.executemany("""
+            INSERT INTO bookings (car_number, date, post_number, service_description, status)
+            VALUES ($1, $2, $3, $4, 'запланировано')
+        """, bookings)
+
+    finally:
+        await conn.close()
+
+async def clear_all_data():
+    conn = await asyncpg.connect(user=DB_USER, password=DB_PASSWORD, database=DB_NAME, host=DB_HOST, port=DB_PORT)
+    try:
+        await conn.execute("TRUNCATE TABLE bookings RESTART IDENTITY CASCADE;")
+        await conn.execute("TRUNCATE TABLE cars RESTART IDENTITY CASCADE;")
+        await conn.execute("TRUNCATE TABLE users RESTART IDENTITY CASCADE;")
     finally:
         await conn.close()

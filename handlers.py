@@ -15,6 +15,7 @@ import re
 from aiogram.fsm.context import FSMContext
 from utils.states import *
 from aiogram.utils.markdown import hlink
+from datetime import datetime
 
 router = Router()
 
@@ -276,7 +277,7 @@ async def car_model(message: Message, state: FSMContext):
 
 @router.message(EditProfile.car_year)
 async def car_year(message: Message, state: FSMContext):
-    car_year = message.text.lower()
+    car_year = message.text.strip()
     await state.update_data(car_year=car_year)
 
     await state.set_state(EditProfile.car_color)
@@ -506,10 +507,16 @@ async def booking_start(message: Message, state: FSMContext):
 
 @router.callback_query(StateFilter(BookingStates.select_date))
 async def select_date_callback(call: CallbackQuery, state: FSMContext):
-    date = call.data.split("_")[1]
+    date_str = call.data.split("_")[1]
+    # Убираем префикс "date:"
+    if date_str.startswith("date:"):
+        date_str = date_str[len("date:"):]
+    date = datetime.strptime(date_str, "%Y-%m-%d").date()
     await state.update_data(booking_date=date)
     await call.message.answer("Введите номер телефона или номер автомобиля:")
     await state.set_state(BookingStates.input_client_data)
+
+
 
 @router.message(BookingStates.input_client_data)
 async def input_client_data(message: Message, state: FSMContext):
@@ -591,10 +598,6 @@ async def input_service(message: Message, state: FSMContext):
     booking_date = data.get("booking_date")  # Дата записи
     car_number = data.get("car_number")  # Номер автомобиля
     client_id = data.get("client_id")  # ID клиента
-
-    # Очистим booking_date от лишнего текста "date:"
-    if booking_date:
-        booking_date = booking_date.replace("date:", "").strip()  # Удаляем "date:" и лишние пробелы
 
     # Если все необходимые данные есть, создаём запись
     if booking_date and car_number and client_id:
@@ -686,13 +689,13 @@ async def select_reschedule_callback(call: CallbackQuery, state: FSMContext):
 # Обработчик для выбора новой даты
 @router.callback_query(StateFilter(BookingStates.select_new_date))
 async def select_new_date_callback(call: CallbackQuery, state: FSMContext):
-    new_date = call.data.split("_")[1]
+    new_date_str = call.data.split("_")[1]
+    # Убираем префикс "date:"
+    if new_date_str.startswith("date:"):
+        new_date_str = new_date_str[len("date:"):]
+    new_date = datetime.strptime(new_date_str, "%Y-%m-%d").date()
     data = await state.get_data()
     booking_id = data.get("booking_id")
-
-    # Убираем "date:" из даты
-    if new_date.startswith("date:"):
-        new_date = new_date[len("date:"):]
 
     # Получаем данные о текущей записи
     booking = await get_booking_by_id(booking_id)
@@ -864,7 +867,6 @@ async def process_car_number(message: types.Message, state: FSMContext):
     await message.answer(response, reply_markup=keyboard.stats_kb)
     await state.set_state(States.search_start)
 
-
 @router.message(States.waiting_for_car_brands)
 async def process_car_brands(message: Message, state: FSMContext):
     car_brands = [brand.strip().lower() for brand in message.text.split(',')]
@@ -886,6 +888,22 @@ async def process_car_brands(message: Message, state: FSMContext):
 
 
 
+
+
+
+
+
+@router.message(F.text.lower() == "генерация данных")
+async def generate_data(message: Message):
+    await generate_fake_data()
+    await message.answer("Данные успешно сгенерированы.", reply_markup=keyboard.after_start_admin_kb)
+
+@router.message(F.text.lower() == "удаление данных")
+async def clear_data(message: Message):
+    await clear_all_data()
+    await message.answer("Данные успешно удалены.", reply_markup=keyboard.admin_start_kb)
+
+
 @router.message(F.text.lower() == "наши контакты")
 async def registration(message: Message) -> None:
     text1 = hlink('VKontakte', 'https://vk.com/studia818')
@@ -901,4 +919,3 @@ async def registration(message: Message) -> None:
 @router.message()
 async def dont_understand(message: Message) -> None:
     await message.answer(f"Я не могу распознать данную команду или текст")
-
