@@ -175,6 +175,7 @@ async def editProfile(message: Message, state: FSMContext):
     await message.answer(f"Что Вы хотите изменить?", reply_markup=keyboard.edit_kb)
     await state.set_state(EditProfile.start)
 
+
 @router.message(EditProfile.start)
 async def editorStart(message: Message, state: FSMContext):
     if message.text.lower() == "изменить номер телефона":
@@ -185,7 +186,22 @@ async def editorStart(message: Message, state: FSMContext):
         await message.answer("Введите регистрационный номер авто: ", reply_markup=None)
     elif message.text.lower() == "редактировать авто":
         await state.set_state(EditProfile.editAuto)
-        await message.answer("РЕДАКТИРОВАНИЕ АВТО: ", reply_markup=None)
+        telegram_id = message.from_user.id
+        user_data = await get_user_by_id(telegram_id)
+
+        if user_data is None:
+            await message.answer("Вы не зарегистрированы в системе.")
+            return
+
+        user_id = user_data["id"]
+        cars = await get_cars_by_client(user_id)
+
+        if not cars:
+            await message.answer("У вас нет автомобилей для редактирования.")
+            return
+
+        await message.answer("Выберите автомобиль для редактирования:", reply_markup=keyboard.edit_car_kb(cars))
+        await state.set_state(EditProfile.selectCarToEdit)
     elif message.text.lower() == "назад":
         await state.clear()
         telegram_id = message.from_user.id
@@ -357,6 +373,96 @@ async def repainted_car_callback(call: CallbackQuery, state: FSMContext):
         await call.message.answer("Поздравляю, авто успешно добавлено!",
                                    reply_markup=keyboard.after_start_kb)
     await call.answer()
+
+
+
+
+@router.callback_query(StateFilter(EditProfile.selectCarToEdit))
+async def select_car_to_edit(call: CallbackQuery, state: FSMContext):
+    car_number = call.data.split("_")[2]
+    await state.update_data(car_number=car_number)
+    await call.message.answer("Выберите, что хотите изменить:", reply_markup=keyboard.edit_car_options_kb())
+    await state.set_state(EditProfile.editCarOption)
+    await call.answer()
+
+@router.callback_query(StateFilter(EditProfile.editCarOption))
+async def select_car_option_to_edit(call: CallbackQuery, state: FSMContext):
+    option = call.data.split("_")[1]
+    await state.update_data(edit_option=option)
+
+    if option == "color":
+        await call.message.answer("Введите новый цвет авто:")
+        await state.set_state(EditProfile.editCarColor)
+    elif option == "number":
+        await call.message.answer("Введите новый номер авто:")
+        await state.set_state(EditProfile.editCarNumber)
+    elif option == "wrapped":
+        await call.message.answer("Выберите, оклеен ли авто плёнкой:", reply_markup=keyboard.wrap_car_kb())
+        await state.set_state(EditProfile.editCarWrapped)
+    elif option == "repainted":
+        await call.message.answer("Есть ли на авто крашеные элементы:", reply_markup=keyboard.repaint_car_kb())
+        await state.set_state(EditProfile.editCarRepainted)
+
+    await call.answer()
+
+@router.message(EditProfile.editCarColor)
+async def edit_car_color(message: Message, state: FSMContext):
+    new_color = message.text.strip().lower()
+    data = await state.get_data()
+    car_number = data.get("car_number")
+
+    await update_car_color(car_number, new_color)
+    await message.answer("Цвет авто успешно обновлён!", reply_markup=keyboard.after_start_admin_kb)
+    await state.clear()
+
+@router.message(EditProfile.editCarNumber)
+async def edit_car_number(message: Message, state: FSMContext):
+    new_number = message.text.strip().lower()
+    data = await state.get_data()
+    old_number = data.get("car_number")
+
+    car = await get_car_by_number(new_number)
+    if car is not None:
+        await message.answer("Такой номер авто уже зарегистрирован.")
+        return
+
+    await update_car_number(old_number, new_number)
+    await message.answer("Номер авто успешно обновлён!", reply_markup=keyboard.after_start_admin_kb)
+    await state.clear()
+
+@router.callback_query(StateFilter(EditProfile.editCarWrapped))
+async def edit_car_wrapped(call: CallbackQuery, state: FSMContext):
+    if call.data == "wrap_yes":
+        wrapped_car = "Полностью"
+    elif call.data == "wrap_50":
+        wrapped_car = "Частично"
+    elif call.data == "wrap_no":
+        wrapped_car = "Нет"
+
+    data = await state.get_data()
+    car_number = data.get("car_number")
+
+    await update_car_wrapped(car_number, wrapped_car)
+    await call.message.answer("Статус оклейки авто плёнкой успешно обновлён!", reply_markup=keyboard.after_start_admin_kb)
+    await state.clear()
+    await call.answer()
+
+@router.callback_query(StateFilter(EditProfile.editCarRepainted))
+async def edit_car_repainted(call: CallbackQuery, state: FSMContext):
+    if call.data == "repaint_yes":
+        repainted_car = "Да"
+    elif call.data == "repaint_no":
+        repainted_car = "Нет"
+
+    data = await state.get_data()
+    car_number = data.get("car_number")
+
+    await update_car_repainted(car_number, repainted_car)
+    await call.message.answer("Статус крашеных элементов авто успешно обновлён!", reply_markup=keyboard.after_start_admin_kb)
+    await state.clear()
+    await call.answer()
+
+
 
 @router.message(F.text.lower() == "поиск")
 async def search_handler(message: types.Message, state: FSMContext):
@@ -882,6 +988,266 @@ async def process_car_brands(message: Message, state: FSMContext):
     await state.clear()
     await message.answer(response, reply_markup=keyboard.stats_kb)
     await state.set_state(States.search_start)
+
+
+
+@router.message(F.text.lower() == "редактировать профиль клиента")
+async def edit_client_profile(message: Message, state: FSMContext):
+    await message.answer("Введите номер телефона клиента:")
+    await state.set_state(EditClientProfile.phone)
+
+@router.message(EditClientProfile.phone)
+async def process_client_phone(message: Message, state: FSMContext):
+    phone_number = message.text.strip()
+    phone_pattern = re.compile(r"^\+?\d{11,15}$")
+
+    if not phone_pattern.match(phone_number):
+        await message.answer("Номер телефона введён неверно, попробуйте ещё раз")
+        return
+
+    client_data = await get_user_by_phone(phone_number)
+    if client_data is None:
+        await message.answer("Клиент с таким номером телефона не найден.")
+        await state.clear()
+        return
+
+    await state.update_data(client_id=client_data["id"], phone_number=phone_number)
+    cars = await get_cars_by_client(client_data["id"])
+
+    response = f"Клиент найден:\n" \
+               f"Имя: {client_data['name']}\n" \
+               f"Телефон: {client_data['phone_number']}\n"
+
+    if cars:
+        response += "Автомобили:\n"
+        for car in cars:
+            response += f"- {car['car_brand']} {car['car_model']} ({car['car_year']}) - {car['car_number']}\n"
+    else:
+        response += "Автомобилей нет.\n"
+
+    await message.answer(response, reply_markup=keyboard.edit_client_kb)
+    await state.set_state(EditClientProfile.start)
+
+@router.message(EditClientProfile.start)
+async def edit_client_start(message: Message, state: FSMContext):
+    if message.text.lower() == "изменить номер телефона":
+        await state.set_state(EditClientProfile.new_phone)
+        await message.answer("Введите новый номер телефона:")
+    elif message.text.lower() == "добавить авто":
+        await state.set_state(EditClientProfile.addAuto)
+        await message.answer("Введите регистрационный номер авто:")
+    elif message.text.lower() == "редактировать авто":
+        data = await state.get_data()
+        client_id = data.get("client_id")
+        cars = await get_cars_by_client(client_id)
+
+        if not cars:
+            await message.answer("У клиента нет автомобилей для редактирования.")
+            return
+
+        await state.set_state(EditClientProfile.editAuto)
+        await message.answer("Выберите автомобиль для редактирования:", reply_markup=keyboard.edit_car_kb(cars))
+    elif message.text.lower() == "назад":
+        await state.clear()
+        await message.answer("Вы вернулись в главное меню.", reply_markup=keyboard.after_start_admin_kb)
+
+@router.message(EditClientProfile.new_phone)
+async def process_new_phone(message: Message, state: FSMContext):
+    new_phone_number = message.text.strip()
+    phone_pattern = re.compile(r"^\+?\d{11,15}$")
+
+    if not phone_pattern.match(new_phone_number):
+        await message.answer("Номер телефона введён неверно, попробуйте ещё раз")
+        return
+
+    data = await state.get_data()
+    old_phone_number = data.get("phone_number")
+    client_id = data.get("client_id")
+
+    if old_phone_number == new_phone_number:
+        await message.answer("Новый номер телефона совпадает со старым.")
+        return
+
+    exists = await get_user_by_phone(new_phone_number)
+    if exists:
+        await message.answer("Номер телефона уже зарегистрирован.")
+        return
+
+    await update_phone(old_phone_number, new_phone_number)
+    await message.answer(f"Номер телефона успешно обновлён на {new_phone_number}")
+    await state.clear()
+
+@router.message(EditClientProfile.addAuto)
+async def add_car_for_client(message: Message, state: FSMContext):
+    car_number = message.text.strip().lower()
+    data = await state.get_data()
+    client_id = data.get("client_id")
+
+    car = await get_car_by_number(car_number)
+    if car is not None:
+        await message.answer("Такой номер авто уже зарегистрирован.")
+        await state.clear()
+        return
+
+    await state.update_data(car_number=car_number)
+    await message.answer("Введите марку авто:")
+    await state.set_state(EditClientProfile.car_brand)
+
+@router.message(EditClientProfile.car_brand)
+async def car_brand(message: Message, state: FSMContext):
+    car_brand = message.text.strip().lower()
+    await state.update_data(car_brand=car_brand)
+    await message.answer("Введите модель авто:")
+    await state.set_state(EditClientProfile.car_model)
+
+@router.message(EditClientProfile.car_model)
+async def car_model(message: Message, state: FSMContext):
+    car_model = message.text.strip().lower()
+    await state.update_data(car_model=car_model)
+    await message.answer("Введите год выпуска авто:")
+    await state.set_state(EditClientProfile.car_year)
+
+@router.message(EditClientProfile.car_year)
+async def car_year(message: Message, state: FSMContext):
+    car_year = message.text.strip()
+    await state.update_data(car_year=car_year)
+    await message.answer("Введите цвет авто:")
+    await state.set_state(EditClientProfile.car_color)
+
+@router.message(EditClientProfile.car_color)
+async def car_color(message: Message, state: FSMContext):
+    car_color = message.text.strip().lower()
+    await state.update_data(car_color=car_color)
+    await message.answer("Выберите, оклеен ли авто плёнкой:", reply_markup=keyboard.wrap_car_kb())
+    await state.set_state(EditClientProfile.wrapped_car)
+
+@router.callback_query(StateFilter(EditClientProfile.wrapped_car))
+async def wrapped_car_callback(call: CallbackQuery, state: FSMContext):
+    if call.data == "wrap_yes":
+        await state.update_data(wrapped_car="Полностью")
+    elif call.data == "wrap_50":
+        await state.update_data(wrapped_car="Частично")
+    elif call.data == "wrap_no":
+        await state.update_data(wrapped_car="Нет")
+
+    await call.message.answer("Есть ли на авто крашеные элементы:", reply_markup=keyboard.repaint_car_kb())
+    await state.set_state(EditClientProfile.repainted_car)
+    await call.answer()
+
+@router.callback_query(StateFilter(EditClientProfile.repainted_car))
+async def repainted_car_callback(call: CallbackQuery, state: FSMContext):
+    if call.data == "repaint_yes":
+        await state.update_data(repainted_car="Да")
+    elif call.data == "repaint_no":
+        await state.update_data(repainted_car="Нет")
+
+    data = await state.get_data()
+    client_id = data.get("client_id")
+    car_number = data.get("car_number")
+    car_brand = data.get("car_brand")
+    car_model = data.get("car_model")
+    car_year = data.get("car_year")
+    car_color = data.get("car_color")
+    wrapped_car = data.get("wrapped_car")
+    repainted_car = data.get("repainted_car")
+
+    await add_car(car_number, client_id, car_brand, car_model, car_year, car_color, wrapped_car, repainted_car)
+    await call.message.answer("Авто успешно добавлено!", reply_markup=keyboard.after_start_admin_kb)
+    await state.clear()
+    await call.answer()
+
+
+@router.callback_query(StateFilter(EditClientProfile.editAuto))
+async def select_car_to_edit(call: CallbackQuery, state: FSMContext):
+    car_number = call.data.split("_")[2]
+    await state.update_data(car_number=car_number)
+    await call.message.answer("Выберите, что хотите изменить:", reply_markup=keyboard.edit_car_options_kb())
+    await state.set_state(EditClientProfile.editCarOption)
+    await call.answer()
+
+@router.callback_query(StateFilter(EditClientProfile.editCarOption))
+async def select_car_option_to_edit(call: CallbackQuery, state: FSMContext):
+    option = call.data.split("_")[1]
+    await state.update_data(edit_option=option)
+
+    if option == "color":
+        await call.message.answer("Введите новый цвет авто:")
+        await state.set_state(EditClientProfile.editCarColor)
+    elif option == "number":
+        await call.message.answer("Введите новый номер авто:")
+        await state.set_state(EditClientProfile.editCarNumber)
+    elif option == "wrapped":
+        await call.message.answer("Выберите, оклеен ли авто плёнкой:", reply_markup=keyboard.wrap_car_kb())
+        await state.set_state(EditClientProfile.editCarWrapped)
+    elif option == "repainted":
+        await call.message.answer("Есть ли на авто крашеные элементы:", reply_markup=keyboard.repaint_car_kb())
+        await state.set_state(EditClientProfile.editCarRepainted)
+
+    await call.answer()
+
+@router.message(EditClientProfile.editCarColor)
+async def edit_car_color(message: Message, state: FSMContext):
+    new_color = message.text.strip().lower()
+    data = await state.get_data()
+    car_number = data.get("car_number")
+
+    await update_car_color(car_number, new_color)
+    await message.answer("Цвет авто успешно обновлён!", reply_markup=keyboard.after_start_admin_kb)
+    await state.clear()
+
+@router.message(EditClientProfile.editCarNumber)
+async def edit_car_number(message: Message, state: FSMContext):
+    new_number = message.text.strip().lower()
+    data = await state.get_data()
+    old_number = data.get("car_number")
+
+    car = await get_car_by_number(new_number)
+    if car is not None:
+        await message.answer("Такой номер авто уже зарегистрирован.")
+        return
+
+    await update_car_number(old_number, new_number)
+    await message.answer("Номер авто успешно обновлён!", reply_markup=keyboard.after_start_admin_kb)
+    await state.clear()
+
+@router.callback_query(StateFilter(EditClientProfile.editCarWrapped))
+async def edit_car_wrapped(call: CallbackQuery, state: FSMContext):
+    if call.data == "wrap_yes":
+        wrapped_car = "Полностью"
+    elif call.data == "wrap_50":
+        wrapped_car = "Частично"
+    elif call.data == "wrap_no":
+        wrapped_car = "Нет"
+
+    data = await state.get_data()
+    car_number = data.get("car_number")
+
+    await update_car_wrapped(car_number, wrapped_car)
+    await call.message.answer("Статус оклейки авто плёнкой успешно обновлён!", reply_markup=keyboard.after_start_admin_kb)
+    await state.clear()
+    await call.answer()
+
+@router.callback_query(StateFilter(EditClientProfile.editCarRepainted))
+async def edit_car_repainted(call: CallbackQuery, state: FSMContext):
+    if call.data == "repaint_yes":
+        repainted_car = "Да"
+    elif call.data == "repaint_no":
+        repainted_car = "Нет"
+
+    data = await state.get_data()
+    car_number = data.get("car_number")
+
+    await update_car_repainted(car_number, repainted_car)
+    await call.message.answer("Статус крашеных элементов авто успешно обновлён!", reply_markup=keyboard.after_start_admin_kb)
+    await state.clear()
+    await call.answer()
+
+
+
+
+
+
+
 
 
 

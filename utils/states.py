@@ -15,15 +15,21 @@ class UserDataforAdmin(StatesGroup):
 class EditProfile(StatesGroup):
     start = State()
     phone = State()
+    name = State()
     addAuto = State()
-    editAuto = State()
-    car_number = State()
     car_brand = State()
     car_model = State()
     car_year = State()
     car_color = State()
     wrapped_car = State()
     repainted_car = State()
+    editAuto = State()
+    selectCarToEdit = State()
+    editCarOption = State()
+    editCarColor = State()
+    editCarNumber = State()
+    editCarWrapped = State()
+    editCarRepainted = State()
 
 
 class SearchData(StatesGroup):
@@ -57,3 +63,22 @@ class States(StatesGroup):
     pattern = State()
     telegram_ids = State()
     waiting_for_car_brands = State()
+
+
+class EditClientProfile(StatesGroup):
+    phone = State()
+    start = State()
+    new_phone = State()
+    addAuto = State()
+    car_brand = State()
+    car_model = State()
+    car_year = State()
+    car_color = State()
+    wrapped_car = State()
+    repainted_car = State()
+    editAuto = State()
+    editCarOption = State()
+    editCarColor = State()
+    editCarNumber = State()
+    editCarWrapped = State()
+    editCarRepainted = State()

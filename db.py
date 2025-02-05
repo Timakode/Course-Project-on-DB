@@ -642,11 +642,60 @@ async def generate_fake_data():
     finally:
         await conn.close()
 
+
 async def clear_all_data():
     conn = await asyncpg.connect(user=DB_USER, password=DB_PASSWORD, database=DB_NAME, host=DB_HOST, port=DB_PORT)
     try:
         await conn.execute("TRUNCATE TABLE bookings RESTART IDENTITY CASCADE;")
         await conn.execute("TRUNCATE TABLE cars RESTART IDENTITY CASCADE;")
         await conn.execute("TRUNCATE TABLE users RESTART IDENTITY CASCADE;")
+    finally:
+        await conn.close()
+
+
+async def update_car_color(car_number: str, new_color: str):
+    conn = await asyncpg.connect(user=DB_USER, password=DB_PASSWORD, database=DB_NAME, host=DB_HOST, port=DB_PORT)
+    try:
+        await conn.execute("""
+            UPDATE cars
+            SET car_color = $1
+            WHERE car_number = $2
+        """, new_color, car_number)
+    finally:
+        await conn.close()
+
+
+async def update_car_number(old_number: str, new_number: str):
+    conn = await asyncpg.connect(user=DB_USER, password=DB_PASSWORD, database=DB_NAME, host=DB_HOST, port=DB_PORT)
+    try:
+        await conn.execute("""
+            UPDATE cars
+            SET car_number = $1
+            WHERE car_number = $2
+        """, new_number, old_number)
+    finally:
+        await conn.close()
+
+
+async def update_car_wrapped(car_number: str, wrapped_car: str):
+    conn = await asyncpg.connect(user=DB_USER, password=DB_PASSWORD, database=DB_NAME, host=DB_HOST, port=DB_PORT)
+    try:
+        await conn.execute("""
+            UPDATE cars
+            SET wrapped_car = $1
+            WHERE car_number = $2
+        """, wrapped_car, car_number)
+    finally:
+        await conn.close()
+
+
+async def update_car_repainted(car_number: str, repainted_car: str):
+    conn = await asyncpg.connect(user=DB_USER, password=DB_PASSWORD, database=DB_NAME, host=DB_HOST, port=DB_PORT)
+    try:
+        await conn.execute("""
+            UPDATE cars
+            SET repainted_car = $1
+            WHERE car_number = $2
+        """, repainted_car, car_number)
     finally:
         await conn.close()

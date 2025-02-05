@@ -227,3 +227,32 @@ stats_kb = ReplyKeyboardMarkup(
     input_field_placeholder="Выберите пункт меню",
     selective=True
 )
+
+
+edit_client_kb = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Изменить номер телефона")],
+        [KeyboardButton(text="Добавить авто"), KeyboardButton(text="Редактировать авто")],
+        [KeyboardButton(text="Назад")]
+    ],
+    resize_keyboard=True
+)
+
+
+def edit_car_kb(cars):
+    buttons = [
+        [InlineKeyboardButton(text=car['car_number'], callback_data=f"edit_car_{car['car_number']}")]
+        for car in cars
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def edit_car_options_kb():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Изменить цвет", callback_data="edit_color")],
+            [InlineKeyboardButton(text="Изменить номер", callback_data="edit_number")],
+            [InlineKeyboardButton(text="Изменить оклейку плёнкой", callback_data="edit_wrapped")],
+            [InlineKeyboardButton(text="Изменить крашеные элементы", callback_data="edit_repainted")]
+        ]
+    )
