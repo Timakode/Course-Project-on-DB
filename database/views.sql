@@ -2,11 +2,22 @@
 DROP TRIGGER IF EXISTS user_view_trigger ON управление_пользователями;
 
 -- Drop existing views
-DROP VIEW IF EXISTS car_full_info;
-DROP VIEW IF EXISTS active_appointments;
-DROP VIEW IF EXISTS service_statistics;
-DROP VIEW IF EXISTS box_workload;
-DROP VIEW IF EXISTS user_management;
+DROP VIEW IF EXISTS car_model_details CASCADE;
+DROP VIEW IF EXISTS car_full_info CASCADE;
+DROP VIEW IF EXISTS active_bookings CASCADE;
+DROP VIEW IF EXISTS service_statistics CASCADE;
+DROP VIEW IF EXISTS box_workload CASCADE;
+DROP VIEW IF EXISTS user_management CASCADE;
+
+-- Представление для отображения моделей с их брендами (перемещаем в начало)
+CREATE OR REPLACE VIEW car_model_details AS
+SELECT 
+    m.id,
+    m.model,
+    m.brand_id,
+    b.brand
+FROM car_models m
+JOIN car_brands b ON m.brand_id = b.id;
 
 -- Full car information view
 CREATE OR REPLACE VIEW car_full_info AS
@@ -28,45 +39,45 @@ JOIN car_colors cc ON c.color_id = cc.id
 JOIN car_wraps cw ON c.wrap_id = cw.id
 JOIN car_repaints cr ON c.repaint_id = cr.id;
 
--- Active appointments view
-CREATE OR REPLACE VIEW active_appointments AS
+-- Active bookings view
+CREATE OR REPLACE VIEW active_bookings AS
 SELECT 
-    a.id,
-    a.date,
+    b.id,
+    b.date,
     u.username,
     u.phone_number,
     c.plate_number,
-    sb.type as box_type,
+    bx.type as box_type,
     ws.status as work_status
-FROM appointments a
-JOIN users u ON a.user_id = u.id
-JOIN cars c ON a.plate_number = c.plate_number
-JOIN service_boxes sb ON a.box_id = sb.id
-JOIN work_status ws ON a.status_id = ws.id
+FROM bookings b
+JOIN users u ON b.user_id = u.id
+JOIN cars c ON b.plate_number = c.plate_number
+JOIN boxes bx ON b.box_id = bx.id
+JOIN work_status ws ON b.status_id = ws.id
 WHERE ws.status IN ('Pending', 'In Progress');
 
 -- Service statistics view
 CREATE OR REPLACE VIEW service_statistics AS
 SELECT 
     s.name,
-    COUNT(aps.appointment_id) as orders_count,
-    COUNT(DISTINCT a.user_id) as clients_count
+    COUNT(bs.booking_id) as orders_count,
+    COUNT(DISTINCT b.user_id) as clients_count
 FROM services s
-LEFT JOIN appointment_services aps ON s.id = aps.service_id
-LEFT JOIN appointments a ON aps.appointment_id = a.id
+LEFT JOIN book_services bs ON s.id = bs.service_id
+LEFT JOIN bookings b ON bs.booking_id = b.id
 GROUP BY s.id, s.name;
 
 -- Box workload view
 CREATE OR REPLACE VIEW box_workload AS
 SELECT 
-    sb.type as box_type,
-    COUNT(a.id) as total_appointments,
-    COUNT(CASE WHEN ws.status = 'In Progress' THEN 1 END) as active_appointments,
-    COUNT(CASE WHEN ws.status = 'Completed' THEN 1 END) as completed_appointments
-FROM service_boxes sb
-LEFT JOIN appointments a ON sb.id = a.box_id
-LEFT JOIN work_status ws ON a.status_id = ws.id
-GROUP BY sb.id, sb.type;
+    bx.type as box_type,
+    COUNT(b.id) as total_bookings,
+    COUNT(CASE WHEN ws.status = 'In Progress' THEN 1 END) as active_bookings,
+    COUNT(CASE WHEN ws.status = 'Completed' THEN 1 END) as completed_bookings
+FROM boxes bx
+LEFT JOIN bookings b ON bx.id = b.box_id
+LEFT JOIN work_status ws ON b.status_id = ws.id
+GROUP BY bx.id, bx.type;
 
 -- User management view
 CREATE OR REPLACE VIEW user_management AS
@@ -75,7 +86,7 @@ SELECT
     username,
     phone_number,
     (SELECT COUNT(*) FROM cars WHERE user_id = u.id) as cars_count,
-    (SELECT COUNT(*) FROM appointments WHERE user_id = u.id) as appointments_count
+    (SELECT COUNT(*) FROM bookings WHERE user_id = u.id) as bookings_count
 FROM users u;
 
 -- Create trigger for user management view

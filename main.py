@@ -5,8 +5,10 @@ import asyncpg
 from dotenv import load_dotenv
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                            QHBoxLayout, QTabWidget, QTableWidget, QTableWidgetItem,
-                           QPushButton, QMessageBox, QDialog, QHeaderView)
-from dialogs import AddUserDialog
+                           QPushButton, QMessageBox, QDialog, QHeaderView,
+                           QInputDialog)
+from dialogs import (AddUserDialog, SimpleInputDialog, BoxInputDialog, 
+                     ServiceInputDialog, CarModelDialog, BoxDialog)
 import threading
 from PyQt6.QtCore import QMetaObject, Qt, Q_ARG, QObject, pyqtSlot, pyqtSignal, QTimer
 
@@ -36,6 +38,8 @@ class TableTab(QWidget):
     refresh_table_signal = pyqtSignal()
     # Добавляем новый сигнал для показа предупреждения
     show_warning_signal = pyqtSignal(str)
+    # Добавляем новый сигнал для создания диалога
+    get_box_capacity_signal = pyqtSignal(str, name='getBoxCapacity')
 
     def __init__(self, db, table_name, headers):
         super().__init__()
@@ -81,6 +85,8 @@ class TableTab(QWidget):
         self.show_error_signal.connect(self._show_error_dialog)
         self.refresh_table_signal.connect(self.refresh_data)
         self.show_warning_signal.connect(self._show_warning_dialog)
+        # Подключаем новый сигнал
+        self.get_box_capacity_signal.connect(self._get_box_capacity)
 
         # Добавляем таймер для автообновления
         self.refresh_timer = QTimer()
@@ -140,8 +146,163 @@ class TableTab(QWidget):
                         print(f"Error: {str(e)}")
                         QMessageBox.critical(self, "Ошибка", str(e))
                         break
+        elif self.table_name in ['work_status', 'car_brands', 'car_colors', 'car_wraps', 'car_repaints']:
+            dialog = SimpleInputDialog(f"Добавление записи", "Название")
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                data = dialog.get_data()
+                loop = self.window().loop
+                if loop and loop.is_running():
+                    future = asyncio.run_coroutine_threadsafe(
+                        self._add_simple_record(data['name']), 
+                        loop
+                    )
+                    try:
+                        result = future.result()
+                        if result.get('success'):
+                            QMessageBox.information(self, "Успех", "Запись успешно добавлена")
+                        else:
+                            QMessageBox.warning(self, "Ошибка", result.get('error'))
+                    except Exception as e:
+                        QMessageBox.critical(self, "Ошибка", str(e))
+
+        elif self.table_name == 'boxes':
+            dialog = BoxDialog(parent=self)
+            while dialog.exec() == QDialog.DialogCode.Accepted:
+                data = dialog.get_data()
+                if not data['type']:
+                    QMessageBox.warning(self, "Предупреждение", 
+                        "Необходимо указать тип бокса.")
+                    continue
+
+                loop = self.window().loop
+                if loop and loop.is_running():
+                    future = asyncio.run_coroutine_threadsafe(
+                        self._add_box(data),
+                        loop
+                    )
+                    try:
+                        result = future.result()
+                        if result.get('success'):
+                            QMessageBox.information(self, "Успех", 
+                                "Бокс успешно добавлен")
+                            break
+                        else:
+                            if result.get('error') == 'type_exists':
+                                continue  # Продолжаем цикл для повторного ввода
+                            QMessageBox.warning(self, "Ошибка", 
+                                result.get('error'))
+                            break
+                    except Exception as e:
+                        print(f"Error: {str(e)}")
+                        QMessageBox.critical(self, "Ошибка", str(e))
+                        break
+
+        elif self.table_name == 'services':
+            dialog = ServiceInputDialog(self.db.pool, parent=self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                data = dialog.get_data()
+                if not data['name'] or data['duration'] < 15:
+                    QMessageBox.warning(self, "Предупреждение", 
+                        "Необходимо указать название услуги и длительность не менее 15 минут")
+                    return
+
+                loop = self.window().loop
+                if loop and loop.is_running():
+                    future = asyncio.run_coroutine_threadsafe(
+                        self._add_service(data), 
+                        loop
+                    )
+                    try:
+                        result = future.result()
+                        print(f"Service add result: {result}")  # Отладочный вывод
+                        if result and result.get('success'):
+                            # Обновляем данные
+                            refresh_future = asyncio.run_coroutine_threadsafe(
+                                self._refresh_data(),
+                                loop
+                            )
+                            refresh_future.result()
+                            # Обновляем таблицу boxes
+                            boxes_tab = self.window().tables.get('Boxes')
+                            if boxes_tab:
+                                boxes_future = asyncio.run_coroutine_threadsafe(
+                                    boxes_tab._refresh_data(),
+                                    loop
+                                )
+                                boxes_future.result()
+                            QMessageBox.information(self, "Успех", 
+                                "Услуга успешно добавлена")
+                        elif result and result.get('error') == 'cancelled':
+                            return
+                        else:
+                            QMessageBox.warning(self, "Ошибка", 
+                                result.get('error', 'Неизвестная ошибка'))
+                    except Exception as e:
+                        print(f"Error in service addition: {str(e)}")  # Отладочный вывод
+                        QMessageBox.critical(self, "Ошибка", str(e))
+
+        elif self.table_name == 'car_models':
+            dialog = CarModelDialog(self.db.pool, parent=self)
+            
+            # Загружаем бренды перед показом диалога
+            loop = self.window().loop
+            if loop and loop.is_running():
+                future = asyncio.run_coroutine_threadsafe(
+                    self._load_brands_for_dialog(dialog.brand_combo),
+                    loop
+                )
+                try:
+                    future.result()
+                except Exception as e:
+                    print(f"Error loading brands: {str(e)}")
+                    QMessageBox.critical(self, "Ошибка", 
+                        "Не удалось загрузить список брендов")
+                    return
+            
+            while dialog.exec() == QDialog.DialogCode.Accepted:
+                data = dialog.get_data()
+                if not data['model'] or not data['brand']:
+                    QMessageBox.warning(self, "Предупреждение",
+                        "Необходимо указать модель и бренд автомобиля.")
+                    continue
+
+                loop = self.window().loop
+                if loop and loop.is_running():
+                    future = asyncio.run_coroutine_threadsafe(
+                        self._add_car_model(data),
+                        loop
+                    )
+                    try:
+                        result = future.result()
+                        if result.get('success'):
+                            QMessageBox.information(self, "Успех", 
+                                "Модель успешно добавлена")
+                            break
+                        else:
+                            QMessageBox.warning(self, "Ошибка", 
+                                result.get('error'))
+                            continue
+                    except Exception as e:
+                        print(f"Error: {str(e)}")
+                        QMessageBox.critical(self, "Ошибка", str(e))
+                        break
+
+    async def _load_brands_for_dialog(self, combo_box):
+        async with self.db.pool.acquire() as conn:
+            brands = await conn.fetch('SELECT * FROM get_car_brands()')
+            combo_box.clear()
+            for brand in brands:
+                combo_box.addItem(brand['brand'])
 
     def edit_record(self):
+        selected_items = self.table.selectedItems()
+        if not selected_items:
+            QMessageBox.warning(self, "Предупреждение", "Выберите запись для изменения")
+            return
+
+        row = selected_items[0].row()
+        record_id = int(self.table.item(row, 0).text())
+
         if self.table_name == 'users':
             # Получаем выбранные строки
             selected_items = self.table.selectedItems()
@@ -193,6 +354,363 @@ class TableTab(QWidget):
                         print(f"Error: {str(e)}")
                         QMessageBox.critical(self, "Ошибка", str(e))
                         break
+        
+        elif self.table_name == 'work_status':
+            dialog = SimpleInputDialog(
+                "Изменение статуса", 
+                "Статус",
+                self.table.item(row, 1).text()
+            )
+            
+            while dialog.exec() == QDialog.DialogCode.Accepted:
+                new_data = dialog.get_data()
+                if not new_data['name']:
+                    QMessageBox.warning(self, "Предупреждение", 
+                        "Необходимо указать статус.")
+                    continue
+
+                loop = self.window().loop
+                if loop and loop.is_running():
+                    future = asyncio.run_coroutine_threadsafe(
+                        self._update_work_status(record_id, new_data['name']),
+                        loop
+                    )
+                    try:
+                        result = future.result()
+                        if result.get('success'):
+                            QMessageBox.information(self, "Успех", 
+                                "Статус успешно обновлен")
+                            break
+                        else:
+                            QMessageBox.warning(self, "Предупреждение", 
+                                f"Ошибка при обновлении статуса: {result.get('error')}")
+                            break
+                    except Exception as e:
+                        print(f"Error: {str(e)}")
+                        QMessageBox.critical(self, "Ошибка", str(e))
+                        break
+
+        elif self.table_name == 'car_brands':
+            dialog = SimpleInputDialog(
+                "Изменение бренда", 
+                "Название бренда",
+                self.table.item(row, 1).text()
+            )
+            
+            while dialog.exec() == QDialog.DialogCode.Accepted:
+                new_data = dialog.get_data()
+                if not new_data['name']:
+                    QMessageBox.warning(self, "Предупреждение", 
+                        "Необходимо указать название бренда.")
+                    continue
+
+                loop = self.window().loop
+                if loop and loop.is_running():
+                    future = asyncio.run_coroutine_threadsafe(
+                        self._update_car_brand(record_id, new_data['name']),
+                        loop
+                    )
+                    try:
+                        result = future.result()
+                        if result.get('success'):
+                            QMessageBox.information(self, "Успех", 
+                                "Бренд успешно обновлен")
+                            break
+                        else:
+                            QMessageBox.warning(self, "Предупреждение", 
+                                f"Ошибка при обновлении бренда: {result.get('error')}")
+                            break
+                    except Exception as e:
+                        print(f"Error: {str(e)}")
+                        QMessageBox.critical(self, "Ошибка", str(e))
+                        break
+
+        elif self.table_name == 'car_models':
+            # Загружаем данные модели
+            loop = self.window().loop
+            if loop and loop.is_running():
+                future = asyncio.run_coroutine_threadsafe(
+                    self._get_model_details(record_id),
+                    loop
+                )
+                try:
+                    model_data = future.result()
+                    if not model_data:
+                        QMessageBox.warning(self, "Ошибка", 
+                            "Не удалось загрузить данные модели")
+                        return
+                except Exception as e:
+                    print(f"Error loading model details: {str(e)}")
+                    QMessageBox.critical(self, "Ошибка", 
+                        "Не удалось загрузить данные модели")
+                    return
+
+            dialog = CarModelDialog(self.db.pool, model_data, self)
+            
+            # Загружаем бренды перед показом диалога
+            future = asyncio.run_coroutine_threadsafe(
+                self._load_brands_for_dialog(dialog.brand_combo),
+                loop
+            )
+            try:
+                future.result()
+            except Exception as e:
+                print(f"Error loading brands: {str(e)}")
+                QMessageBox.critical(self, "Ошибка", 
+                    "Не удалось загрузить список брендов")
+                return
+            
+            while dialog.exec() == QDialog.DialogCode.Accepted:
+                new_data = dialog.get_data()
+                if not new_data['model'] or not new_data['brand']:
+                    QMessageBox.warning(self, "Предупреждение", 
+                        "Необходимо указать модель и бренд автомобиля.")
+                    continue
+
+                future = asyncio.run_coroutine_threadsafe(
+                    self._update_car_model(record_id, new_data),
+                    loop
+                )
+                try:
+                    result = future.result()
+                    if result.get('success'):
+                        QMessageBox.information(self, "Успех", 
+                            "Модель успешно обновлена")
+                        break
+                    else:
+                        QMessageBox.warning(self, "Ошибка", 
+                            result.get('error'))
+                        continue
+                except Exception as e:
+                    print(f"Error: {str(e)}")
+                    QMessageBox.critical(self, "Ошибка", str(e))
+                    break
+
+        elif self.table_name == 'car_colors':
+            dialog = SimpleInputDialog(
+                "Изменение цвета", 
+                "Название цвета",
+                self.table.item(row, 1).text()
+            )
+            
+            while dialog.exec() == QDialog.DialogCode.Accepted:
+                new_data = dialog.get_data()
+                if not new_data['name']:
+                    QMessageBox.warning(self, "Предупреждение", 
+                        "Необходимо указать название цвета.")
+                    continue
+
+                loop = self.window().loop
+                if loop and loop.is_running():
+                    future = asyncio.run_coroutine_threadsafe(
+                        self._update_car_color(record_id, new_data['name']),
+                        loop
+                    )
+                    try:
+                        result = future.result()
+                        if result.get('success'):
+                            QMessageBox.information(self, "Успех", 
+                                "Цвет успешно обновлен")
+                            break
+                        else:
+                            QMessageBox.warning(self, "Предупреждение", 
+                                f"Ошибка при обновлении цвета: {result.get('error')}")
+                            continue
+                    except Exception as e:
+                        print(f"Error: {str(e)}")
+                        QMessageBox.critical(self, "Ошибка", str(e))
+                        break
+
+        elif self.table_name in ['car_wraps', 'car_repaints']:
+            dialog = SimpleInputDialog(
+                f"Изменение статуса", 
+                "Статус",
+                self.table.item(row, 1).text()
+            )
+            
+            while dialog.exec() == QDialog.DialogCode.Accepted:
+                new_data = dialog.get_data()
+                if not new_data['name']:
+                    QMessageBox.warning(self, "Предупреждение", 
+                        "Необходимо указать статус.")
+                    continue
+
+                loop = self.window().loop
+                if loop and loop.is_running():
+                    future = asyncio.run_coroutine_threadsafe(
+                        self._update_status(self.table_name, record_id, new_data['name']),
+                        loop
+                    )
+                    try:
+                        result = future.result()
+                        if result.get('success'):
+                            QMessageBox.information(self, "Успех", 
+                                "Статус успешно обновлен")
+                            break
+                        else:
+                            if result.get('error') == 'status_exists':
+                                continue # Продолжаем цикл для повторного ввода
+                            QMessageBox.warning(self, "Предупреждение", 
+                                f"Ошибка при обновлении статуса: {result.get('error')}")
+                            break
+                    except Exception as e:
+                        print(f"Error: {str(e)}")
+                        QMessageBox.critical(self, "Ошибка", str(e))
+                        break
+
+        elif self.table_name == 'boxes':
+            dialog = BoxDialog(
+                {
+                    'type': self.table.item(row, 1).text(),
+                    'capacity': int(self.table.item(row, 2).text())
+                }, 
+                self
+            )
+            
+            while dialog.exec() == QDialog.DialogCode.Accepted:
+                new_data = dialog.get_data()
+                if not new_data['type']:
+                    QMessageBox.warning(self, "Предупреждение", 
+                        "Необходимо указать тип бокса.")
+                    continue
+
+                loop = self.window().loop
+                if loop and loop.is_running():
+                    future = asyncio.run_coroutine_threadsafe(
+                        self._update_box(record_id, new_data),
+                        loop
+                    )
+                    try:
+                        result = future.result()
+                        if result.get('success'):
+                            QMessageBox.information(self, "Успех", 
+                                "Бокс успешно обновлен")
+                            break
+                        else:
+                            if result.get('error') == 'type_exists':
+                                continue  # Продолжаем цикл для повторного ввода
+                            QMessageBox.warning(self, "Ошибка", 
+                                result.get('error'))
+                            break
+                    except Exception as e:
+                        print(f"Error: {str(e)}")
+                        QMessageBox.critical(self, "Ошибка", str(e))
+                        break
+
+    async def _get_model_details(self, model_id):
+        async with self.db.pool.acquire() as conn:
+            return await conn.fetchrow(
+                'SELECT * FROM get_car_model_details($1)',
+                model_id
+            )
+
+    async def _update_car_model(self, model_id, new_data):
+        try:
+            async with self.db.pool.acquire() as conn:
+                await conn.execute(
+                    'CALL update_car_model($1, $2, $3)',
+                    model_id, new_data['model'], new_data['brand']
+                )
+                
+                # Обновляем данные во всех связанных таблицах
+                for tab_name, tab_widget in self.window().tables.items():
+                    if tab_name in ['Car Models', 'Car Brands']:
+                        await tab_widget._refresh_data()
+                
+                return {'success': True}
+        except Exception as e:
+            return {'error': str(e)}
+
+    async def _update_car_color(self, color_id, new_color):
+        try:
+            async with self.db.pool.acquire() as conn:
+                # Проверяем существование с учетом регистра
+                existing_color = await conn.fetchrow(
+                    'SELECT * FROM check_car_color_exists_except($1, $2)',
+                    new_color, color_id
+                )
+
+                if existing_color:
+                    self.show_warning_signal.emit(
+                        "Такой цвет уже существует (без учета регистра)."
+                    )
+                    return {'error': 'color_exists'}
+
+                # Вызываем процедуру обновления
+                await conn.execute(
+                    'CALL update_car_color($1, $2)', 
+                    color_id, new_color
+                )
+
+                await self._refresh_data()
+                return {'success': True}
+
+        except Exception as e:
+            print(f"Error in _update_car_color: {str(e)}")
+            return {'error': str(e)}
+
+    async def _update_status(self, table_name, record_id, new_status):
+        try:
+            async with self.db.pool.acquire() as conn:
+                if table_name == 'car_wraps':
+                    # Проверяем существование с учетом регистра
+                    existing = await conn.fetchrow(
+                        'SELECT * FROM check_car_wrap_exists_except($1, $2)',
+                        new_status, record_id
+                    )
+                    if existing:
+                        self.show_warning_signal.emit(
+                            "Такой статус оклейки уже существует (без учета регистра)."
+                        )
+                        return {'error': 'status_exists'}
+                    await conn.execute('CALL update_car_wrap($1, $2)', record_id, new_status)
+
+                elif table_name == 'car_repaints':
+                    existing = await conn.fetchrow(
+                        'SELECT * FROM check_car_repaint_exists_except($1, $2)',
+                        new_status, record_id
+                    )
+                    if existing:
+                        self.show_warning_signal.emit(
+                            "Такой статус перекраса уже существует (без учета регистра)."
+                        )
+                        return {'error': 'status_exists'}
+                    await conn.execute('CALL update_car_repaint($1, $2)', record_id, new_status)
+
+                await self._refresh_data()
+                return {'success': True}
+        except Exception as e:
+            print(f"Error in _update_status: {str(e)}")
+            return {'error': str(e)}
+
+    async def _update_box(self, box_id, new_data):
+        try:
+            async with self.db.pool.acquire() as conn:
+                # Проверяем существование с учетом регистра
+                existing = await conn.fetchrow(
+                    'SELECT * FROM check_box_exists_except($1, $2)',
+                    new_data['type'],
+                    box_id
+                )
+                if existing:
+                    self.show_warning_signal.emit(
+                        "Такой тип бокса уже существует (без учета регистра)."
+                    )
+                    return {'error': 'type_exists'}
+
+                # Обновляем бокс
+                await conn.execute(
+                    'CALL update_box($1, $2, $3)',
+                    box_id,
+                    new_data['type'],
+                    new_data['capacity']
+                )
+                
+                await self._refresh_data()
+                return {'success': True}
+        except Exception as e:
+            print(f"Error in _update_box: {str(e)}")
+            return {'error': str(e)}
 
     def _on_task_complete(self, future):
         try:
@@ -224,20 +742,31 @@ class TableTab(QWidget):
     def _show_warning_dialog(self, message):
         QMessageBox.warning(self, "Предупреждение", message)
 
+    @pyqtSlot(str)
+    def _get_box_capacity(self, box_type):
+        """Показывает диалог для ввода вместимости бокса в главном потоке"""
+        capacity, ok = QInputDialog.getInt(
+            self,
+            "Новый бокс",
+            f"Укажите вместимость для нового типа бокса '{box_type}':",
+            1, 1, 10
+        )
+        # Сохраняем результат для использования в асинхронном методе
+        self.dialog_result = (capacity, ok) if ok else None
+
     async def _add_user(self, user_data):
         try:
             username = user_data['username'].strip()
             phone = user_data['phone_number'].strip()
             
             async with self.db.pool.acquire() as conn:
-                # Сначала проверяем существование телефона
+                # Используем функцию из queries.sql для проверки
                 existing_user = await conn.fetchrow(
-                    'SELECT * FROM users WHERE phone_number = $1',
+                    'SELECT * FROM check_phone_exists($1)',
                     phone
                 )
                 
-                if (existing_user):
-                    # Отправляем сигнал вместо прямого вызова QMessageBox
+                if existing_user:
                     self.show_warning_signal.emit(
                         "Такой номер телефона уже есть в базе данных. Введите другой."
                     )
@@ -269,7 +798,7 @@ class TableTab(QWidget):
             async with self.db.pool.acquire() as conn:
                 # Проверяем существование пользователя с таким ID
                 existing_user = await conn.fetchrow(
-                    'SELECT * FROM users WHERE id = $1',
+                    'SELECT * FROM check_user_exists($1)',
                     user_id
                 )
 
@@ -281,7 +810,7 @@ class TableTab(QWidget):
 
                 # Проверяем, не занят ли новый номер телефона другим пользователем
                 phone_in_use = await conn.fetchrow(
-                    'SELECT 1 FROM users WHERE phone_number = $1 AND id != $2',
+                    'SELECT * FROM check_phone_used_by_other($1, $2)',
                     new_phone_number, user_id
                 )
 
@@ -291,12 +820,15 @@ class TableTab(QWidget):
                     )
                     return {'error': 'phone_in_use'}
 
-                # Вызываем процедуру для обновления данных пользователя
-                await conn.execute('CALL update_user($1, $2, $3)', user_id, new_username, new_phone_number)
+                # Вызываем процедуру обновления
+                await conn.execute(
+                    'CALL update_user($1, $2, $3)', 
+                    user_id, new_username, new_phone_number
+                )
 
-                # Проверяем, что данные пользователя обновлены
+                # Проверяем обновление
                 updated_user = await conn.fetchrow(
-                    'SELECT * FROM users WHERE id = $1',
+                    'SELECT * FROM check_user_exists($1)',
                     user_id
                 )
 
@@ -309,6 +841,155 @@ class TableTab(QWidget):
 
         except Exception as e:
             print(f"Error in _update_user: {str(e)}")
+            return {'error': str(e)}
+
+    async def _update_work_status(self, status_id, new_status):
+        try:
+            async with self.db.pool.acquire() as conn:
+                # Проверяем существование с учетом регистра
+                existing_status = await conn.fetchrow(
+                    'SELECT * FROM work_status WHERE normalize_string(status) = normalize_string($1) AND id != $2',
+                    new_status, status_id
+                )
+
+                if existing_status:
+                    self.show_warning_signal.emit(
+                        "Такой статус уже существует (без учета регистра)."
+                    )
+                    return {'error': 'status_exists'}
+
+                # Вызываем процедуру обновления
+                await conn.execute(
+                    'CALL update_work_status($1, $2)', 
+                    status_id, new_status
+                )
+
+                await self._refresh_data()
+                return {'success': True}
+
+        except Exception as e:
+            return {'error': str(e)}
+
+    async def _update_car_brand(self, brand_id, new_brand):
+        try:
+            async with self.db.pool.acquire() as conn:
+                # Проверяем существование с учетом регистра
+                existing_brand = await conn.fetchrow(
+                    'SELECT * FROM check_car_brand_exists_except($1, $2)',
+                    new_brand, brand_id
+                )
+
+                if existing_brand:
+                    self.show_warning_signal.emit(
+                        "Такой бренд уже существует."
+                    )
+                    return {'error': 'brand_exists'}
+
+                # Вызываем процедуру обновления
+                await conn.execute(
+                    'CALL update_car_brand($1, $2)', 
+                    brand_id, new_brand
+                )
+
+                await self._refresh_data()
+                return {'success': True}
+
+        except Exception as e:
+            return {'error': str(e)}
+
+    async def _add_simple_record(self, name):
+        try:
+            async with self.db.pool.acquire() as conn:
+                # Определяем процедуру и параметр в зависимости от таблицы
+                if self.table_name == 'work_status':
+                    await conn.execute('CALL add_work_status($1)', name)
+                elif self.table_name == 'car_brands':
+                    await conn.execute('CALL add_car_brand($1)', name)
+                elif self.table_name == 'car_colors':
+                    await conn.execute('CALL add_car_color($1)', name)
+                elif self.table_name == 'car_wraps':
+                    await conn.execute('CALL add_car_wrap($1)', name)
+                elif self.table_name == 'car_repaints':
+                    await conn.execute('CALL add_car_repaint($1)', name)
+                
+                await self._refresh_data()
+                return {'success': True}
+        except Exception as e:
+            return {'error': str(e)}
+
+    async def _add_car_model(self, data):
+        try:
+            async with self.db.pool.acquire() as conn:
+                await conn.execute(
+                    'CALL add_car_model($1, $2)',
+                    data['model'], data['brand']
+                )
+                
+                # Обновляем данные во всех связанных таблицах
+                for tab_name, tab_widget in self.window().tables.items():
+                    if tab_name in ['Car Models', 'Car Brands']:
+                        await tab_widget._refresh_data()
+                        
+                return {'success': True}
+        except Exception as e:
+            return {'error': str(e)}
+
+    async def _add_box(self, data):
+        try:
+            async with self.db.pool.acquire() as conn:
+                # Проверяем существование с учетом регистра
+                existing = await conn.fetchrow(
+                    'SELECT * FROM check_box_exists_except($1, -1)',
+                    data['type']
+                )
+                if existing:
+                    self.show_warning_signal.emit(
+                        "Такой тип бокса уже существует (без учета регистра)."
+                    )
+                    return {'error': 'type_exists'}
+
+                # Добавляем бокс
+                await conn.execute(
+                    'CALL add_box($1, $2)',
+                    data['type'],
+                    data['capacity']
+                )
+                
+                await self._refresh_data()
+                return {'success': True}
+        except Exception as e:
+            print(f"Error in _add_box: {str(e)}")
+            return {'error': str(e)}
+
+    async def _add_service(self, data):
+        try:
+            async with self.db.pool.acquire() as conn:
+                # Для нового бокса используем сохраненную вместимость из диалога
+                if data['is_new_box']:
+                    await conn.execute(
+                        'CALL add_service_with_box($1, $2, $3, $4)',
+                        data['name'],
+                        data['duration'],
+                        data['box_type'],
+                        data['box_capacity']
+                    )
+
+                    # Обновляем таблицу boxes
+                    boxes_tab = self.window().tables.get('Boxes')
+                    if boxes_tab:
+                        await boxes_tab._refresh_data()
+                else:
+                    await conn.execute(
+                        'CALL add_service_with_box($1, $2, $3)',
+                        data['name'],
+                        data['duration'],
+                        data['box_type']
+                    )
+                
+                await self._refresh_data()
+                return {'success': True}
+        except Exception as e:
+            print(f"Error in _add_service: {str(e)}")
             return {'error': str(e)}
 
     def closeEvent(self, event):
@@ -336,12 +1017,12 @@ class MainWindow(QMainWindow):
             'Car Colors': TableTab(self.db, 'car_colors', ['ID', 'Color']),
             'Car Wraps': TableTab(self.db, 'car_wraps', ['ID', 'Status']),
             'Car Repaints': TableTab(self.db, 'car_repaints', ['ID', 'Status']),
-            'Service Boxes': TableTab(self.db, 'service_boxes', ['ID', 'Type']),
-            'Services': TableTab(self.db, 'services', ['ID', 'Name']),
+            'Boxes': TableTab(self.db, 'boxes', ['ID', 'Type', 'Capacity']),
+            'Services': TableTab(self.db, 'services', ['ID', 'Name', 'Duration', 'Box ID']),
             'Users': TableTab(self.db, 'users', ['ID', 'Username', 'Phone']),
             'Cars': TableTab(self.db, 'cars', ['Plate', 'User ID', 'Model ID', 'Year', 'Color ID', 'Wrap ID', 'Repaint ID']),
-            'Appointments': TableTab(self.db, 'appointments', ['ID', 'Box ID', 'User ID', 'Plate', 'Date', 'Status ID']),
-            'Appointment Services': TableTab(self.db, 'appointment_services', ['Appointment ID', 'Service ID'])
+            'Bookings': TableTab(self.db, 'bookings', ['ID', 'Box ID', 'User ID', 'Plate', 'Date', 'Status ID']),
+            'Book Services': TableTab(self.db, 'book_services', ['Booking ID', 'Service ID'])
         }
         
         for name, widget in self.tables.items():
@@ -372,12 +1053,13 @@ class MainWindow(QMainWindow):
         await self.db.connect()
         print("Database connection established")
         
-        # Список SQL файлов для выполнения
+        # Список SQL файлов для выполнения (меняем порядок)
         sql_files = [
-            'database/init.sql',
-            'database/procedures.sql',
-            'database/triggers.sql',
-            'database/views.sql'
+            'database/init.sql',      # Создание таблиц
+            'database/views.sql',     # Создание представлений
+            'database/queries.sql',   # Создание функций
+            'database/procedures.sql', # Создание процедур
+            'database/triggers.sql'   # Создание триггеров
         ]
         
         # Последовательно выполняем каждый файл
@@ -396,7 +1078,7 @@ class MainWindow(QMainWindow):
         print("Database initialization completed")
         await self.refresh_all_tables()
         print("All tables refreshed")
-        
+
     async def refresh_all_tables(self):
         for widget in self.tables.values():
             await widget._refresh_data()

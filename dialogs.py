@@ -1,5 +1,7 @@
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-                           QLineEdit, QPushButton, QFormLayout, QMessageBox)
+                           QLineEdit, QPushButton, QFormLayout, QMessageBox,
+                           QSpinBox, QComboBox, QInputDialog)
+import asyncio
 
 class BaseDialog(QDialog):
     def __init__(self, title="", parent=None):
@@ -47,50 +49,36 @@ class UserDialog(BaseDialog):
         super().accept()
 
 class SimpleInputDialog(QDialog):
-    def __init__(self, table_name, fields, parent=None):
+    def __init__(self, title, field_name, current_value=None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"Add record to {table_name}")
-        self.table_name = table_name
+        self.setWindowTitle(title)
+        self.setMinimumWidth(300)
+        
         layout = QVBoxLayout(self)
-
-        # Create form
-        form = QFormLayout()
-        self.fields = {}
-
-        for field in fields:
-            if field.lower() == 'phone':
-                line_edit = QLineEdit()
-                line_edit.setInputMask('+7999999999999')
-                line_edit.setPlaceholderText('+7XXXXXXXXXX')
-            else:
-                line_edit = QLineEdit()
-
-            form.addRow(f"{field}:", line_edit)
-            self.fields[field.lower()] = line_edit
-
-        layout.addLayout(form)
-
+        
+        # Input field
+        self.text_edit = QLineEdit()
+        if current_value:
+            self.text_edit.setText(current_value)
+        
+        # Add widgets to layout
+        layout.addWidget(QLabel(f"{field_name}:"))
+        layout.addWidget(self.text_edit)
+        
         # Buttons
         btn_layout = QHBoxLayout()
-        save_btn = QPushButton("Save")
-        cancel_btn = QPushButton("Cancel")
-
+        save_btn = QPushButton("Сохранить")
+        cancel_btn = QPushButton("Отмена")
+        
         save_btn.clicked.connect(self.accept)
         cancel_btn.clicked.connect(self.reject)
-
+        
         btn_layout.addWidget(save_btn)
         btn_layout.addWidget(cancel_btn)
         layout.addLayout(btn_layout)
-
-    def get_values(self):
-        if self.table_name == 'users':
-            values = {
-                'username': self.fields['username'].text(),
-                'phone_number': self.fields['phone'].text()
-            }
-            print(f"Dialog returning user values: {values}")
-            return values
-        return {name: widget.text() for name, widget in self.fields.items()}
+    
+    def get_data(self):
+        return {'name': self.text_edit.text().strip()}
 
 class UserInputDialog(QDialog):
     def __init__(self, parent=None):
@@ -180,4 +168,329 @@ class AddUserDialog(QDialog):
         return {
             'username': self.name_edit.text().strip(),
             'phone_number': self.phone_edit.text().strip()
+        }
+
+class SimpleDataDialog(QDialog):
+    def __init__(self, title, field_name, value=None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setMinimumWidth(300)
+        
+        layout = QVBoxLayout(self)
+        
+        # Поле ввода
+        self.data_edit = QLineEdit()
+        if value:
+            self.data_edit.setText(value)
+        
+        layout.addWidget(QLabel(f"{field_name}:"))
+        layout.addWidget(self.data_edit)
+        
+        # Кнопки
+        btn_layout = QHBoxLayout()
+        save_btn = QPushButton("Сохранить")
+        cancel_btn = QPushButton("Отмена")
+        
+        save_btn.clicked.connect(self.accept)
+        cancel_btn.clicked.connect(self.reject)
+        
+        btn_layout.addWidget(save_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+    
+    def get_data(self):
+        return {'name': self.data_edit.text().strip()}
+
+class ServiceDialog(QDialog):
+    def __init__(self, pool, service_data=None, parent=None):
+        super().__init__(parent)
+        self.pool = pool
+        self.setWindowTitle("Услуга")
+        self.setMinimumWidth(300)
+        
+        layout = QVBoxLayout(self)
+        
+        # Поля ввода
+        self.name_edit = QLineEdit()
+        self.duration_spin = QSpinBox()
+        self.duration_spin.setRange(15, 480)  # 15 минут - 8 часов
+        self.duration_spin.setSingleStep(15)  # шаг 15 минут
+        self.box_combo = QComboBox()
+        
+        if service_data:
+            self.name_edit.setText(service_data['name'])
+            self.duration_spin.setValue(service_data['duration'])
+        
+        # Добавляем поля в layout
+        layout.addWidget(QLabel("Название:"))
+        layout.addWidget(self.name_edit)
+        layout.addWidget(QLabel("Длительность (минут):"))
+        layout.addWidget(self.duration_spin)
+        layout.addWidget(QLabel("Бокс:"))
+        layout.addWidget(self.box_combo)
+        
+        # Кнопки
+        btn_layout = QHBoxLayout()
+        save_btn = QPushButton("Сохранить")
+        cancel_btn = QPushButton("Отмена")
+        
+        save_btn.clicked.connect(self.accept)
+        cancel_btn.clicked.connect(self.reject)
+        
+        btn_layout.addWidget(save_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+        
+        # Загружаем боксы
+        asyncio.get_event_loop().run_until_complete(self.load_boxes())
+        
+        if service_data and service_data.get('box_id'):
+            index = self.box_combo.findData(service_data['box_id'])
+            if index >= 0:
+                self.box_combo.setCurrentIndex(index)
+    
+    async def load_boxes(self):
+        async with self.pool.acquire() as conn:
+            boxes = await conn.fetch("SELECT id, type FROM boxes ORDER BY type")
+            self.box_combo.clear()
+            self.box_combo.addItem("Не выбран", None)
+            for box in boxes:
+                self.box_combo.addItem(box['type'], box['id'])
+    
+    def get_data(self):
+        return {
+            'name': self.name_edit.text().strip(),
+            'duration': self.duration_spin.value(),
+            'box_id': self.box_combo.currentData()
+        }
+
+class BoxDialog(QDialog):
+    def __init__(self, current_data=None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Бокс")
+        self.setMinimumWidth(300)
+        
+        layout = QVBoxLayout(self)
+        
+        # Поля ввода
+        self.type_edit = QLineEdit()
+        self.capacity_spin = QSpinBox()
+        self.capacity_spin.setMinimum(1)
+        self.capacity_spin.setMaximum(10)
+        
+        if current_data:
+            self.type_edit.setText(current_data.get('type', ''))
+            self.capacity_spin.setValue(current_data.get('capacity', 1))
+        
+        # Add fields to layout
+        layout.addWidget(QLabel("Тип бокса:"))
+        layout.addWidget(self.type_edit)
+        layout.addWidget(QLabel("Вместимость:"))
+        layout.addWidget(self.capacity_spin)
+        
+        # Buttons
+        btn_layout = QHBoxLayout()
+        save_btn = QPushButton("Сохранить")
+        cancel_btn = QPushButton("Отмена")
+        
+        save_btn.clicked.connect(self.accept)
+        cancel_btn.clicked.connect(self.reject)
+        
+        btn_layout.addWidget(save_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+    
+    def get_data(self):
+        return {
+            'type': self.type_edit.text().strip(),
+            'capacity': self.capacity_spin.value()
+        }
+
+class BoxInputDialog(QDialog):
+    def __init__(self, current_data=None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Добавление бокса")
+        self.setMinimumWidth(300)
+        
+        layout = QVBoxLayout(self)
+        
+        # Поля ввода
+        self.type_edit = QLineEdit()
+        self.capacity_spin = QSpinBox()
+        self.capacity_spin.setRange(1, 10)
+        
+        if current_data:
+            self.type_edit.setText(current_data.get('type', ''))
+            self.capacity_spin.setValue(current_data.get('capacity', 1))
+        
+        # Add widgets to layout
+        layout.addWidget(QLabel("Тип бокса:"))
+        layout.addWidget(self.type_edit)
+        layout.addWidget(QLabel("Вместимость:"))
+        layout.addWidget(self.capacity_spin)
+        
+        # Buttons
+        btn_layout = QHBoxLayout()
+        save_btn = QPushButton("Сохранить")
+        cancel_btn = QPushButton("Отмена")
+        
+        save_btn.clicked.connect(self.accept)
+        cancel_btn.clicked.connect(self.reject)
+        
+        btn_layout.addWidget(save_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+    
+    def get_data(self):
+        return {
+            'type': self.type_edit.text().strip(),
+            'capacity': self.capacity_spin.value()
+        }
+
+class ServiceInputDialog(QDialog):
+    def __init__(self, pool, parent=None):
+        super().__init__(parent)
+        self.pool = pool
+        self.setWindowTitle("Добавление услуги")
+        self.setMinimumWidth(300)
+        
+        layout = QVBoxLayout(self)
+        
+        # Поля ввода
+        self.name_edit = QLineEdit()
+        self.duration_spin = QSpinBox()
+        self.duration_spin.setRange(15, 480)  # 15 минут - 8 часов
+        self.duration_spin.setSingleStep(15)  # шаг 15 минут
+        self.box_combo = QComboBox()
+        self.box_combo.setEditable(True)
+        self.box_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        
+        layout.addWidget(QLabel("Название:"))
+        layout.addWidget(self.name_edit)
+        layout.addWidget(QLabel("Длительность (минут):"))
+        layout.addWidget(self.duration_spin)
+        layout.addWidget(QLabel("Тип бокса:"))
+        layout.addWidget(self.box_combo)
+        
+        # Кнопки
+        btn_layout = QHBoxLayout()
+        save_btn = QPushButton("Сохранить")
+        cancel_btn = QPushButton("Отмена")
+        
+        save_btn.clicked.connect(self.accept)
+        cancel_btn.clicked.connect(self.reject)
+        
+        btn_layout.addWidget(save_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+        
+        # Загружаем существующие боксы
+        loop = parent.window().loop
+        if loop and loop.is_running():
+            future = asyncio.run_coroutine_threadsafe(self.load_boxes(), loop)
+            try:
+                future.result()
+            except Exception as e:
+                print(f"Error loading boxes: {str(e)}")
+
+    async def load_boxes(self):
+        async with self.pool.acquire() as conn:
+            boxes = await conn.fetch('SELECT * FROM get_box_types()')
+            self.box_combo.clear()
+            for box in boxes:
+                self.box_combo.addItem(f"{box['type']} ({box['capacity']} мест)", 
+                                     {'id': box['id'], 'type': box['type']})
+
+    def accept(self):
+        data = self.get_data()
+        if data['is_new_box']:
+            # Показываем диалог вместимости
+            capacity, ok = QInputDialog.getInt(
+                self,
+                "Новый бокс",
+                f"Укажите вместимость для нового типа бокса '{data['box_type']}':",
+                1, 1, 10
+            )
+            if ok:
+                # Сохраняем вместимость в data и закрываем диалог
+                data['box_capacity'] = capacity
+                self._data = data
+                super().accept()
+            else:
+                # Пользователь отменил ввод вместимости - не закрываем основной диалог
+                return
+        else:
+            # Обычное сохранение для существующего бокса
+            self._data = data
+            super().accept()
+
+    def get_data(self):
+        if hasattr(self, '_data'):
+            return self._data
+            
+        box_data = self.box_combo.currentData()
+        box_type = self.box_combo.currentText().split(' (')[0] if box_data else self.box_combo.currentText()
+        
+        is_new_box = not bool(box_data) or self.box_combo.currentText() != self.box_combo.itemText(self.box_combo.currentIndex())
+        
+        return {
+            'name': self.name_edit.text().strip(),
+            'duration': self.duration_spin.value(),
+            'box_type': box_type,
+            'is_new_box': is_new_box,
+            'box_capacity': None  # Будет заполнено позже для нового бокса
+        }
+
+class CarModelDialog(QDialog):
+    def __init__(self, pool, model_data=None, parent=None):
+        super().__init__(parent)
+        self.pool = pool
+        self.setWindowTitle("Модель автомобиля")
+        self.setMinimumWidth(300)
+        
+        layout = QVBoxLayout(self)
+        
+        # Поля ввода
+        self.model_edit = QLineEdit()
+        self.brand_combo = QComboBox()
+        self.brand_combo.setEditable(True)
+        self.brand_combo.setInsertPolicy(QComboBox.InsertPolicy.InsertAtBottom)
+        
+        # Добавляем поля в layout
+        layout.addWidget(QLabel("Модель:"))
+        layout.addWidget(self.model_edit)
+        layout.addWidget(QLabel("Бренд:"))
+        layout.addWidget(self.brand_combo)
+        
+        # Кнопки
+        btn_layout = QHBoxLayout()
+        save_btn = QPushButton("Сохранить")
+        cancel_btn = QPushButton("Отмена")
+        
+        save_btn.clicked.connect(self.accept)
+        cancel_btn.clicked.connect(self.reject)
+        
+        btn_layout.addWidget(save_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+        
+        # Заполняем данные если это редактирование
+        if model_data:
+            self.model_edit.setText(model_data['model'])
+            self.current_brand = model_data['brand']
+    
+    def _set_current_brand(self):
+        if hasattr(self, 'current_brand'):
+            index = self.brand_combo.findText(self.current_brand)
+            if index >= 0:
+                self.brand_combo.setCurrentIndex(index)
+    
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._set_current_brand()
+    
+    def get_data(self):
+        return {
+            'model': self.model_edit.text().strip(),
+            'brand': self.brand_combo.currentText().strip()
         }

@@ -1,3 +1,8 @@
+-- Удаляем существующие внешние ключи и триггеры
+ALTER TABLE IF EXISTS services DROP CONSTRAINT IF EXISTS services_box_id_fkey;
+DROP TRIGGER IF EXISTS check_work_status_unique ON work_status;
+DROP TRIGGER IF EXISTS work_status_case_check ON work_status;
+
 -- Создание последовательностей для SERIAL полей (если их нет)
 CREATE SEQUENCE IF NOT EXISTS services_id_seq;
 CREATE SEQUENCE IF NOT EXISTS work_status_id_seq;
@@ -5,15 +10,23 @@ CREATE SEQUENCE IF NOT EXISTS car_brands_id_seq;
 CREATE SEQUENCE IF NOT EXISTS car_models_id_seq;
 CREATE SEQUENCE IF NOT EXISTS car_colors_id_seq;
 CREATE SEQUENCE IF NOT EXISTS car_wraps_id_seq;
-CREATE SEQUENCE IF NOT EXISTS appointments_id_seq;
+CREATE SEQUENCE IF NOT EXISTS bookings_id_seq;
 CREATE SEQUENCE IF NOT EXISTS car_repaints_id_seq;
 CREATE SEQUENCE IF NOT EXISTS users_id_seq;
-CREATE SEQUENCE IF NOT EXISTS service_boxes_id_seq;
+CREATE SEQUENCE IF NOT EXISTS boxes_id_seq;
 
--- Создание таблиц (без удаления существующих)
+-- Создание базовых таблиц (без внешних ключей)
+CREATE TABLE IF NOT EXISTS boxes (
+    id INTEGER PRIMARY KEY DEFAULT nextval('boxes_id_seq'),
+    type TEXT NOT NULL UNIQUE,
+    capacity INTEGER NOT NULL DEFAULT 1
+);
+
 CREATE TABLE IF NOT EXISTS services (
     id INTEGER PRIMARY KEY DEFAULT nextval('services_id_seq'),
-    name TEXT NOT NULL UNIQUE
+    name TEXT NOT NULL UNIQUE,
+    duration INTEGER NOT NULL DEFAULT 60,
+    box_id INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS work_status (
@@ -56,11 +69,6 @@ CREATE TABLE IF NOT EXISTS users (
     CONSTRAINT users_phone_unique UNIQUE (phone_number)
 );
 
-CREATE TABLE IF NOT EXISTS service_boxes (
-    id INTEGER PRIMARY KEY DEFAULT nextval('service_boxes_id_seq'),
-    type TEXT NOT NULL UNIQUE
-);
-
 CREATE TABLE IF NOT EXISTS cars (
     plate_number TEXT PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
@@ -71,44 +79,50 @@ CREATE TABLE IF NOT EXISTS cars (
     repaint_id INTEGER NOT NULL REFERENCES car_repaints(id) ON DELETE RESTRICT
 );
 
-CREATE TABLE IF NOT EXISTS appointments (
-    id INTEGER PRIMARY KEY DEFAULT nextval('appointments_id_seq'),
-    box_id INTEGER NOT NULL REFERENCES service_boxes(id) ON DELETE RESTRICT,
+CREATE TABLE IF NOT EXISTS bookings (
+    id INTEGER PRIMARY KEY DEFAULT nextval('bookings_id_seq'),
+    box_id INTEGER NOT NULL REFERENCES boxes(id) ON DELETE RESTRICT,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     plate_number TEXT NOT NULL REFERENCES cars(plate_number) ON DELETE RESTRICT,
     date DATE NOT NULL,
     status_id INTEGER NOT NULL REFERENCES work_status(id) ON DELETE RESTRICT
 );
 
-CREATE TABLE IF NOT EXISTS appointment_services (
-    appointment_id INTEGER REFERENCES appointments(id) ON DELETE CASCADE,
+CREATE TABLE IF NOT EXISTS book_services (
+    booking_id INTEGER REFERENCES bookings(id) ON DELETE CASCADE,
     service_id INTEGER REFERENCES services(id) ON DELETE RESTRICT,
-    PRIMARY KEY (appointment_id, service_id)
+    PRIMARY KEY (booking_id, service_id)
 );
+
+-- Добавление внешних ключей
+ALTER TABLE services 
+ADD CONSTRAINT services_box_id_fkey 
+FOREIGN KEY (box_id) REFERENCES boxes(id) ON DELETE RESTRICT;
 
 -- Создание индексов для оптимизации запросов
 CREATE INDEX IF NOT EXISTS idx_cars_user_id ON cars(user_id);
-CREATE INDEX IF NOT EXISTS idx_appointments_date ON appointments(date);
-CREATE INDEX IF NOT EXISTS idx_appointments_user_id ON appointments(user_id);
-CREATE INDEX IF NOT EXISTS idx_appointments_plate_number ON appointments(plate_number);
+CREATE INDEX IF NOT EXISTS idx_bookings_date ON bookings(date);
+CREATE INDEX IF NOT EXISTS idx_bookings_user_id ON bookings(user_id);
+CREATE INDEX IF NOT EXISTS idx_bookings_plate_number ON bookings(plate_number);
 CREATE INDEX IF NOT EXISTS idx_car_models_brand_id ON car_models(brand_id);
+CREATE INDEX IF NOT EXISTS idx_services_box_id ON services(box_id);
 
--- Начальные данные для справочников
-INSERT INTO work_status (status) VALUES
-    ('Pending'),
-    ('In Progress'),
-    ('Completed'),
-    ('Cancelled')
+-- Добавление начальных данных для справочников
+INSERT INTO work_status (status) VALUES 
+    ('pending'),
+    ('in progress'),
+    ('completed'),
+    ('cancelled')
 ON CONFLICT DO NOTHING;
 
-INSERT INTO car_wraps (status) VALUES
-    ('None'),
-    ('Partial'),
-    ('Full')
+INSERT INTO car_wraps (status) VALUES 
+    ('none'),
+    ('partial'),
+    ('full')
 ON CONFLICT DO NOTHING;
 
-INSERT INTO car_repaints (status) VALUES
-    ('None'),
-    ('Partial'),
-    ('Full')
+INSERT INTO car_repaints (status) VALUES 
+    ('none'),
+    ('partial'),
+    ('full')
 ON CONFLICT DO NOTHING;
