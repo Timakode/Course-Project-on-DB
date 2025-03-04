@@ -1,9 +1,4 @@
--- Удаляем существующие внешние ключи и триггеры
-ALTER TABLE IF EXISTS services DROP CONSTRAINT IF EXISTS services_box_id_fkey;
-DROP TRIGGER IF EXISTS check_work_status_unique ON work_status;
-DROP TRIGGER IF EXISTS work_status_case_check ON work_status;
-
--- Создание последовательностей для SERIAL полей (если их нет)
+-- Create sequences
 CREATE SEQUENCE IF NOT EXISTS services_id_seq;
 CREATE SEQUENCE IF NOT EXISTS work_status_id_seq;
 CREATE SEQUENCE IF NOT EXISTS car_brands_id_seq;
@@ -15,18 +10,11 @@ CREATE SEQUENCE IF NOT EXISTS car_repaints_id_seq;
 CREATE SEQUENCE IF NOT EXISTS users_id_seq;
 CREATE SEQUENCE IF NOT EXISTS boxes_id_seq;
 
--- Создание базовых таблиц (без внешних ключей)
-CREATE TABLE IF NOT EXISTS boxes (
-    id INTEGER PRIMARY KEY DEFAULT nextval('boxes_id_seq'),
-    type TEXT NOT NULL UNIQUE,
-    capacity INTEGER NOT NULL DEFAULT 1
-);
-
+-- Create tables
 CREATE TABLE IF NOT EXISTS services (
     id INTEGER PRIMARY KEY DEFAULT nextval('services_id_seq'),
     name TEXT NOT NULL UNIQUE,
-    duration INTEGER NOT NULL DEFAULT 60,
-    box_id INTEGER
+    duration validated_duration NOT NULL  -- Добавляем поле с правильным типом
 );
 
 CREATE TABLE IF NOT EXISTS work_status (
@@ -63,10 +51,14 @@ CREATE TABLE IF NOT EXISTS car_repaints (
 
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY DEFAULT nextval('users_id_seq'),
-    username VARCHAR(100) NOT NULL CHECK (LENGTH(TRIM(username)) > 0),
-    phone_number VARCHAR(12) NOT NULL 
-        CHECK (phone_number ~ '^\+7[0-9]{10}$'),
-    CONSTRAINT users_phone_unique UNIQUE (phone_number)
+    username TEXT NOT NULL,
+    phone_number TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS boxes (
+    id INTEGER PRIMARY KEY DEFAULT nextval('boxes_id_seq'),
+    type TEXT NOT NULL UNIQUE,
+    capacity INTEGER NOT NULL CHECK (capacity > 0)
 );
 
 CREATE TABLE IF NOT EXISTS cars (
@@ -94,35 +86,48 @@ CREATE TABLE IF NOT EXISTS book_services (
     PRIMARY KEY (booking_id, service_id)
 );
 
--- Добавление внешних ключей
-ALTER TABLE services 
-ADD CONSTRAINT services_box_id_fkey 
-FOREIGN KEY (box_id) REFERENCES boxes(id) ON DELETE RESTRICT;
+-- Create types and domain
+DO $$ 
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'duration_unit') THEN
+        CREATE TYPE duration_unit AS ENUM ('minutes', 'days');
+    END IF;
+END $$;
 
--- Создание индексов для оптимизации запросов
+DO $$ 
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'service_duration') THEN
+        CREATE TYPE service_duration AS (
+            value INTEGER,
+            unit duration_unit
+        );
+    END IF;
+END $$;
+
+DO $$ 
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'validated_duration') THEN
+        CREATE DOMAIN validated_duration AS service_duration
+            CONSTRAINT valid_duration_value CHECK (
+                (((VALUE).unit = 'minutes' AND (VALUE).value BETWEEN 15 AND 480)) OR
+                ((VALUE).unit = 'days' AND (VALUE).value BETWEEN 1 AND 30)
+            );
+    END IF;
+END $$;
+
+-- Удаляем тип car_part если он существует
+DROP TYPE IF EXISTS car_part CASCADE;
+
+-- Создаем таблицу связи для перекрашенных элементов
+CREATE TABLE IF NOT EXISTS car_repaint_links (
+    car_id TEXT REFERENCES cars(plate_number) ON DELETE CASCADE,
+    repaint_id INTEGER REFERENCES car_repaints(id) ON DELETE RESTRICT,
+    PRIMARY KEY (car_id, repaint_id)
+);
+
+-- Create indexes
 CREATE INDEX IF NOT EXISTS idx_cars_user_id ON cars(user_id);
 CREATE INDEX IF NOT EXISTS idx_bookings_date ON bookings(date);
 CREATE INDEX IF NOT EXISTS idx_bookings_user_id ON bookings(user_id);
 CREATE INDEX IF NOT EXISTS idx_bookings_plate_number ON bookings(plate_number);
 CREATE INDEX IF NOT EXISTS idx_car_models_brand_id ON car_models(brand_id);
-CREATE INDEX IF NOT EXISTS idx_services_box_id ON services(box_id);
-
--- Добавление начальных данных для справочников
-INSERT INTO work_status (status) VALUES 
-    ('pending'),
-    ('in progress'),
-    ('completed'),
-    ('cancelled')
-ON CONFLICT DO NOTHING;
-
-INSERT INTO car_wraps (status) VALUES 
-    ('none'),
-    ('partial'),
-    ('full')
-ON CONFLICT DO NOTHING;
-
-INSERT INTO car_repaints (status) VALUES 
-    ('none'),
-    ('partial'),
-    ('full')
-ON CONFLICT DO NOTHING;

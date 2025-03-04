@@ -1,72 +1,3 @@
--- 1. Процедура для добавления нового автомобиля с проверками
-CREATE OR REPLACE PROCEDURE добавить_автомобиль(
-    p_номер_авто TEXT,
-    p_id_пользователя INTEGER,
-    p_бренд TEXT,
-    p_модель TEXT,
-    p_год_выпуска INTEGER,
-    p_цвет TEXT,
-    p_статус_оклейки TEXT,
-    p_статус_перекраса TEXT
-)
-LANGUAGE plpgsql
-AS $$
-DECLARE
-    v_id_бренда INTEGER;
-    v_id_модели INTEGER;
-    v_id_цвета INTEGER;
-    v_id_оклейки INTEGER;
-    v_id_перекраса INTEGER;
-BEGIN
-    -- Проверка существования пользователя
-    IF NOT EXISTS (SELECT 1 FROM пользователи WHERE id = p_id_пользователя) THEN
-        RAISE EXCEPTION 'Пользователь с ID % не найден', p_id_пользователя;
-    END IF;
-
-    -- Получение или создание ID бренда
-    SELECT id INTO v_id_бренда FROM бренд_авто WHERE бренд = p_бренд;
-    IF NOT FOUND THEN
-        INSERT INTO бренд_авто (бренд) VALUES (p_бренд) RETURNING id INTO v_id_бренда;
-    END IF;
-
-    -- Получение или создание ID модели
-    SELECT id INTO v_id_модели FROM модель_авто WHERE модель = p_модель AND id_бренда = v_id_бренда;
-    IF NOT FOUND THEN
-        INSERT INTO модель_авто (модель, id_бренда) VALUES (p_модель, v_id_бренда) RETURNING id INTO v_id_модели;
-    END IF;
-
-    -- Получение или создание ID цвета
-    SELECT id INTO v_id_цвета FROM цвет_авто WHERE цвет = p_цвет;
-    IF NOT FOUND THEN
-        INSERT INTO цвет_авто (цвет) VALUES (p_цвет) RETURNING id INTO v_id_цвета;
-    END IF;
-
-    -- Получение ID оклейки
-    SELECT id INTO v_id_оклейки FROM оклейка_авто WHERE статус_оклейки = p_статус_оклейки;
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'Неверный статус оклейки: %', p_статус_оклейки;
-    END IF;
-
-    -- Получение ID перекраса
-    SELECT id INTO v_id_перекраса FROM перекрас_авто WHERE статус_перекраса = p_статус_перекраса;
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'Неверный статус перекраса: %', p_статус_перекраса;
-    END IF;
-
-    -- Добавление автомобиля
-    INSERT INTO автомобили (
-        номер_авто, id_пользователя, id_модели, год_выпуска,
-        id_цвета, id_оклейки, id_перекраса
-    ) VALUES (
-        p_номер_авто, p_id_пользователя, v_id_модели, p_год_выпуска,
-        v_id_цвета, v_id_оклейки, v_id_перекраса
-    );
-END;
-$$;
-
--- Drop existing procedure
-DROP PROCEDURE IF EXISTS add_user CASCADE;
-
 CREATE OR REPLACE PROCEDURE add_user(
     p_username VARCHAR(100),
     p_phone_number VARCHAR(12)
@@ -89,15 +20,6 @@ BEGIN
     RAISE NOTICE 'User added successfully';
 END;
 $$;
-
--- Test procedure functionality
-DO $$ 
-BEGIN
-    CALL add_user('Test User', '+79999999999');
-EXCEPTION
-    WHEN others THEN
-        RAISE NOTICE 'Test failed: %', SQLERRM;
-END $$;
 
 -- Пересоздаем процедуру update_user
 DROP PROCEDURE IF EXISTS update_user CASCADE;
@@ -154,143 +76,6 @@ EXCEPTION
         RAISE NOTICE 'Test update failed: %', SQLERRM;
 END $$;
 
--- 2. Функция для получения популярных брендов
-CREATE OR REPLACE FUNCTION получить_популярные_бренды(
-    количество INTEGER DEFAULT 3
-)
-RETURNS TABLE (
-    бренд TEXT,
-    количество_автомобилей BIGINT
-)
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    RETURN QUERY
-    SELECT 
-        б.бренд,
-        COUNT(DISTINCT а.номер_авто) as количество_автомобилей
-    FROM бренд_авто б
-    JOIN модель_авто м ON м.id_бренда = б.id
-    JOIN автомобили а ON а.id_модели = м.id
-    GROUP BY б.id, б.бренд
-    ORDER BY количество_автомобилей DESC
-    LIMIT количество;
-END;
-$$;
-
--- 3. Функция для получения непопулярных боксов
-CREATE OR REPLACE FUNCTION получить_непопулярные_боксы(
-    p_дата_начала DATE DEFAULT NULL,
-    p_дата_конца DATE DEFAULT NULL
-)
-RETURNS TABLE (
-    тип_бокса TEXT,
-    количество_записей BIGINT
-)
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    RETURN QUERY
-    SELECT 
-        б.тип_бокса,
-        COUNT(з.id) as количество_записей
-    FROM боксы б
-    LEFT JOIN записи з ON з.id_бокса = б.id
-    WHERE (p_дата_начала IS NULL OR з.дата_записи >= p_дата_начала)
-    AND (p_дата_конца IS NULL OR з.дата_записи <= p_дата_конца)
-    GROUP BY б.id, б.тип_бокса
-    ORDER BY количество_записей ASC;
-END;
-$$;
-
--- 4. Функция для получения популярных услуг
-CREATE OR REPLACE FUNCTION получить_популярные_услуги()
-RETURNS TABLE (
-    название_услуги TEXT,
-    количество_заказов BIGINT,
-    процент_от_общего NUMERIC
-)
-LANGUAGE plpgsql
-AS $$
-DECLARE
-    total_orders BIGINT;
-BEGIN
-    SELECT COUNT(*) INTO total_orders FROM услуги_записей;
-    
-    RETURN QUERY
-    SELECT 
-        у.название_услуги,
-        COUNT(уз.id_услуги) as количество_заказов,
-        ROUND(COUNT(уз.id_услуги)::NUMERIC * 100 / NULLIF(total_orders, 0), 2) as процент_от_общего
-    FROM услуги у
-    LEFT JOIN услуги_записей уз ON уз.id_услуги = у.id
-    GROUP BY у.id, у.название_услуги
-    ORDER BY количество_заказов DESC;
-END;
-$$;
-
--- 5. Процедура для создания новой записи
-CREATE OR REPLACE PROCEDURE создать_запись(
-    p_id_пользователя INTEGER,
-    p_номер_авто TEXT,
-    p_дата_записи DATE,
-    p_услуги INTEGER[]
-)
-LANGUAGE plpgsql
-AS $$
-DECLARE
-    v_id_записи INTEGER;
-    v_id_бокса INTEGER;
-    v_услуга INTEGER;
-BEGIN
-    -- Проверка существования автомобиля и пользователя
-    IF NOT EXISTS (
-        SELECT 1 
-        FROM автомобили 
-        WHERE номер_авто = p_номер_авто 
-        AND id_пользователя = p_id_пользователя
-    ) THEN
-        RAISE EXCEPTION 'Автомобиль % не принадлежит пользователю с ID %', 
-                      p_номер_авто, p_id_пользователя;
-    END IF;
-
-    -- Находим наименее загруженный бокс
-    SELECT id INTO v_id_бокса
-    FROM боксы б
-    LEFT JOIN (
-        SELECT id_бокса, COUNT(*) as занято
-        FROM записи
-        WHERE дата_записи = p_дата_записи
-        GROUP BY id_бокса
-    ) з ON б.id = з.id_бокса
-    ORDER BY з.занято NULLS FIRST
-    LIMIT 1;
-
-    -- Создаем запись
-    INSERT INTO записи (
-        id_бокса,
-        id_пользователя,
-        номер_авто,
-        дата_записи,
-        id_статуса_работы
-    )
-    VALUES (
-        v_id_бокса,
-        p_id_пользователя,
-        p_номер_авто,
-        p_дата_записи,
-        (SELECT id FROM статус_работы WHERE статус_работы = 'Ожидает выполнения')
-    )
-    RETURNING id INTO v_id_записи;
-
-    -- Добавляем услуги
-    FOREACH v_услуга IN ARRAY p_услуги
-    LOOP
-        INSERT INTO услуги_записей (id_записи, id_услуги)
-        VALUES (v_id_записи, v_услуга);
-    END LOOP;
-END;
-$$;
 
 -- Процедуры для добавления данных
 CREATE OR REPLACE PROCEDURE add_status_work(p_status TEXT)
@@ -300,12 +85,7 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE PROCEDURE add_car_brand(p_brand TEXT)
-LANGUAGE plpgsql AS $$
-BEGIN
-    INSERT INTO бренд_авто (бренд) VALUES (p_brand);
-END;
-$$;
+
 
 CREATE OR REPLACE PROCEDURE add_car_model(p_model TEXT, p_brand_id INTEGER)
 LANGUAGE plpgsql AS $$
@@ -340,17 +120,27 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE PROCEDURE add_box(p_type TEXT)
+CREATE OR REPLACE PROCEDURE add_service(
+    p_name TEXT,
+    p_duration_value INTEGER,
+    p_duration_unit duration_unit
+)
 LANGUAGE plpgsql AS $$
+DECLARE
+    v_duration validated_duration;
 BEGIN
-    INSERT INTO боксы (тип_бокса) VALUES (p_type);
-END;
-$$;
-
-CREATE OR REPLACE PROCEDURE add_service(p_name TEXT)
-LANGUAGE plpgsql AS $$
-BEGIN
-    INSERT INTO услуги (название_услуги) VALUES (p_name);
+    -- Создаем значение типа validated_duration
+    v_duration := ROW(p_duration_value, p_duration_unit)::validated_duration;
+    
+    -- Добавляем сервис
+    INSERT INTO services (name, duration)
+    VALUES (normalize_string(p_name), v_duration);
+    
+EXCEPTION
+    WHEN check_violation THEN
+        RAISE EXCEPTION 'Invalid duration: value must be between 15-480 for minutes or 1-30 for days';
+    WHEN unique_violation THEN
+        RAISE EXCEPTION 'Service with name "%" already exists', p_name;
 END;
 $$;
 
@@ -406,27 +196,7 @@ EXCEPTION
 END;
 $$;
 
-CREATE OR REPLACE PROCEDURE add_box(p_type TEXT)
-LANGUAGE plpgsql AS $$
-BEGIN
-    INSERT INTO boxes (type) 
-    VALUES (normalize_string(p_type));
-EXCEPTION
-    WHEN unique_violation THEN
-        RAISE EXCEPTION 'Box type "%" already exists', p_type;
-END;
-$$;
 
-CREATE OR REPLACE PROCEDURE add_service(p_name TEXT, p_duration INTEGER, p_box_id INTEGER)
-LANGUAGE plpgsql AS $$
-BEGIN
-    INSERT INTO services (name, duration, box_id)
-    VALUES (normalize_string(p_name), p_duration, p_box_id);
-EXCEPTION
-    WHEN unique_violation THEN
-        RAISE EXCEPTION 'Service "%" already exists', p_name;
-END;
-$$;
 
 CREATE OR REPLACE PROCEDURE update_work_status(
     p_id INTEGER,
@@ -578,18 +348,6 @@ BEGIN
 END;
 $$;
 
--- Удаляем старые процедуры
-DROP PROCEDURE IF EXISTS add_car_color(text);
-DROP PROCEDURE IF EXISTS update_car_color(integer,text);
-
--- Простая процедура добавления цвета
-CREATE OR REPLACE PROCEDURE add_car_color(p_color TEXT)
-LANGUAGE plpgsql AS $$
-BEGIN
-    INSERT INTO car_colors (color) VALUES (p_color);
-END;
-$$;
-
 -- Простая процедура обновления цвета
 CREATE OR REPLACE PROCEDURE update_car_color(p_id INTEGER, p_color TEXT)
 LANGUAGE plpgsql AS $$
@@ -598,19 +356,6 @@ BEGIN
 END;
 $$;
 
--- Удаляем старые процедуры
-DROP PROCEDURE IF EXISTS add_car_wrap(text);
-DROP PROCEDURE IF EXISTS update_car_wrap(integer,text);
-DROP PROCEDURE IF EXISTS add_car_repaint(text);
-DROP PROCEDURE IF EXISTS update_car_repaint(integer,text);
-
--- Простая процедура добавления статуса оклейки
-CREATE OR REPLACE PROCEDURE add_car_wrap(p_status TEXT)
-LANGUAGE plpgsql AS $$
-BEGIN
-    INSERT INTO car_wraps (status) VALUES (p_status);
-END;
-$$;
 
 -- Простая процедура обновления статуса оклейки
 CREATE OR REPLACE PROCEDURE update_car_wrap(p_id INTEGER, p_status TEXT)
@@ -620,13 +365,6 @@ BEGIN
 END;
 $$;
 
--- Простая процедура добавления статуса перекраса
-CREATE OR REPLACE PROCEDURE add_car_repaint(p_status TEXT)
-LANGUAGE plpgsql AS $$
-BEGIN
-    INSERT INTO car_repaints (status) VALUES (p_status);
-END;
-$$;
 
 -- Простая процедура обновления статуса перекраса
 CREATE OR REPLACE PROCEDURE update_car_repaint(p_id INTEGER, p_status TEXT)
@@ -636,9 +374,6 @@ BEGIN
 END;
 $$;
 
--- Удаляем старые процедуры
-DROP PROCEDURE IF EXISTS add_box(text);
-DROP PROCEDURE IF EXISTS update_box(integer,text);
 
 -- Процедура добавления бокса
 CREATE OR REPLACE PROCEDURE add_box(p_type TEXT, p_capacity INTEGER)
@@ -688,42 +423,36 @@ BEGIN
 END;
 $$;
 
--- Процедура добавления сервиса
-CREATE OR REPLACE PROCEDURE add_service_with_box(
+-- Процедура обновления сервиса
+CREATE OR REPLACE PROCEDURE update_service(
+    p_service_id INTEGER,
     p_name TEXT,
-    p_duration INTEGER,
-    p_box_type TEXT,
-    p_box_capacity INTEGER DEFAULT NULL
+    p_duration_value INTEGER,
+    p_duration_unit duration_unit
 )
 LANGUAGE plpgsql AS $$
 DECLARE
-    v_box_id INTEGER;
+    v_duration validated_duration;
 BEGIN
-    -- Проверка входных данных
-    IF p_name IS NULL OR LENGTH(TRIM(p_name)) = 0 THEN
-        RAISE EXCEPTION 'Service name cannot be empty';
+    -- Проверяем существование сервиса
+    IF NOT EXISTS (SELECT 1 FROM services WHERE id = p_service_id) THEN
+        RAISE EXCEPTION 'Service with ID % not found', p_service_id;
     END IF;
 
-    IF p_duration < 15 THEN
-        RAISE EXCEPTION 'Duration must be at least 15 minutes';
-    END IF;
+    -- Создаем значение типа validated_duration
+    v_duration := ROW(p_duration_value, p_duration_unit)::validated_duration;
+    
+    -- Обновляем сервис
+    UPDATE services 
+    SET name = normalize_string(p_name),
+        duration = v_duration
+    WHERE id = p_service_id;
 
-    -- Ищем существующий бокс
-    SELECT id INTO v_box_id
-    FROM boxes 
-    WHERE normalize_string(type) = normalize_string(p_box_type);
-
-    -- Если бокс не найден и указана вместимость, создаем новый
-    IF NOT FOUND AND p_box_capacity IS NOT NULL THEN
-        INSERT INTO boxes (type, capacity)
-        VALUES (p_box_type, p_box_capacity)
-        RETURNING id INTO v_box_id;
-    ELSIF NOT FOUND THEN
-        RAISE EXCEPTION 'Box type "%" not found', p_box_type;
-    END IF;
-
-    -- Добавляем сервис
-    INSERT INTO services (name, duration, box_id)
-    VALUES (p_name, p_duration, v_box_id);
+EXCEPTION
+    WHEN check_violation THEN
+        RAISE EXCEPTION 'Invalid duration: value must be between 15-480 for minutes or 1-30 for days';
+    WHEN unique_violation THEN
+        RAISE EXCEPTION 'Service with name "%" already exists', p_name;
 END;
 $$;
+

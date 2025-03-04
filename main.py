@@ -7,10 +7,11 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                            QHBoxLayout, QTabWidget, QTableWidget, QTableWidgetItem,
                            QPushButton, QMessageBox, QDialog, QHeaderView,
                            QInputDialog)
+from PyQt6.QtCore import (QMetaObject, Qt, Q_ARG, QObject, pyqtSlot, 
+                         pyqtSignal, QTimer, QDate)  # Добавляем QDate
 from dialogs import (AddUserDialog, SimpleInputDialog, BoxInputDialog, 
                      ServiceInputDialog, CarModelDialog, BoxDialog)
 import threading
-from PyQt6.QtCore import QMetaObject, Qt, Q_ARG, QObject, pyqtSlot, pyqtSignal, QTimer
 
 load_dotenv()
 
@@ -99,21 +100,38 @@ class TableTab(QWidget):
     async def _refresh_data(self):
         try:
             async with self.db.pool.acquire() as conn:
-                data = await conn.fetch(f'SELECT * FROM {self.table_name}')
-                
-                self.table.setRowCount(len(data))
-                for row, record in enumerate(data):
-                    for col, value in enumerate(record):
-                        item = QTableWidgetItem(str(value))
-                        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)  # Центрируем текст
-                        self.table.setItem(row, col, item)
-                
-                # Устанавливаем высоту строк
-                for row in range(self.table.rowCount()):
-                    self.table.setRowHeight(row, 25)
-                
-                # Подгоняем размер колонок под содержимое
-                self.table.resizeColumnsToContents()
+                # Специальная обработка для таблицы services
+                if self.table_name == 'services':
+                    data = await conn.fetch('SELECT * FROM get_services_list()')
+                    
+                    self.table.setRowCount(len(data))
+                    for row, record in enumerate(data):
+                        # ID и Name отображаем как обычно
+                        self.table.setItem(row, 0, QTableWidgetItem(str(record['id'])))
+                        self.table.setItem(row, 1, QTableWidgetItem(record['name']))
+                        
+                        # Форматируем duration в зависимости от unit
+                        duration_text = (
+                            f"{record['duration_value']} дней" 
+                            if record['duration_unit'] == 'days'
+                            else f"{record['duration_value']} минут"
+                        )
+                        self.table.setItem(row, 2, QTableWidgetItem(duration_text))
+                else:
+                    # Стандартная обработка для других таблиц
+                    data = await conn.fetch(f'SELECT * FROM {self.table_name}')
+                    self.table.setRowCount(len(data))
+                    for row, record in enumerate(data):
+                        for col, value in enumerate(record):
+                            item = QTableWidgetItem(str(value))
+                            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                            self.table.setItem(row, col, item)
+
+            # Устанавливаем высоту строк и подгоняем размер колонок
+            for row in range(self.table.rowCount()):
+                self.table.setRowHeight(row, 25)
+            self.table.resizeColumnsToContents()
+
         except Exception as e:
             print(f"Error refreshing data: {str(e)}")
 
@@ -201,9 +219,14 @@ class TableTab(QWidget):
             dialog = ServiceInputDialog(self.db.pool, parent=self)
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 data = dialog.get_data()
-                if not data['name'] or data['duration'] < 15:
+                # Изменяем проверку на новые поля
+                if not data['name'] or (
+                    (data['duration_unit'] == 'minutes' and data['duration_value'] < 15) or
+                    (data['duration_unit'] == 'days' and data['duration_value'] < 1)
+                ):
                     QMessageBox.warning(self, "Предупреждение", 
-                        "Необходимо указать название услуги и длительность не менее 15 минут")
+                        "Необходимо указать название услуги и корректную длительность"
+                    )
                     return
 
                 loop = self.window().loop
@@ -214,31 +237,20 @@ class TableTab(QWidget):
                     )
                     try:
                         result = future.result()
-                        print(f"Service add result: {result}")  # Отладочный вывод
                         if result and result.get('success'):
-                            # Обновляем данные
+                            # Создаем новую задачу для обновления данных
                             refresh_future = asyncio.run_coroutine_threadsafe(
                                 self._refresh_data(),
                                 loop
                             )
-                            refresh_future.result()
-                            # Обновляем таблицу boxes
-                            boxes_tab = self.window().tables.get('Boxes')
-                            if boxes_tab:
-                                boxes_future = asyncio.run_coroutine_threadsafe(
-                                    boxes_tab._refresh_data(),
-                                    loop
-                                )
-                                boxes_future.result()
+                            refresh_future.result()  # Ждем завершения обновления
                             QMessageBox.information(self, "Успех", 
                                 "Услуга успешно добавлена")
-                        elif result and result.get('error') == 'cancelled':
-                            return
                         else:
                             QMessageBox.warning(self, "Ошибка", 
                                 result.get('error', 'Неизвестная ошибка'))
                     except Exception as e:
-                        print(f"Error in service addition: {str(e)}")  # Отладочный вывод
+                        print(f"Error in service addition: {str(e)}")
                         QMessageBox.critical(self, "Ошибка", str(e))
 
         elif self.table_name == 'car_models':
@@ -286,6 +298,38 @@ class TableTab(QWidget):
                         print(f"Error: {str(e)}")
                         QMessageBox.critical(self, "Ошибка", str(e))
                         break
+
+        elif self.table_name == 'cars':
+            from dialogs import CarInputDialog
+            dialog = CarInputDialog(self.db.pool, parent=self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                data = dialog.get_data()
+                
+                loop = self.window().loop
+                if loop and loop.is_running():
+                    future = asyncio.run_coroutine_threadsafe(
+                        self._add_car(data),
+                        loop
+                    )
+                    try:
+                        result = future.result()
+                        if result.get('success'):
+                            # Обновляем таблицу сразу после успешного добавления
+                            refresh_future = asyncio.run_coroutine_threadsafe(
+                                self._refresh_data(),
+                                loop
+                            )
+                            # Ждем завершения обновления
+                            refresh_future.result()
+                            
+                            QMessageBox.information(self, "Успех", 
+                                "Автомобиль успешно добавлен")
+                        else:
+                            QMessageBox.warning(self, "Ошибка", 
+                                result.get('error', 'Неизвестная ошибка'))
+                    except Exception as e:
+                        print(f"Error in car addition: {str(e)}")
+                        QMessageBox.critical(self, "Ошибка", str(e))
 
     async def _load_brands_for_dialog(self, combo_box):
         async with self.db.pool.acquire() as conn:
@@ -597,6 +641,54 @@ class TableTab(QWidget):
                         QMessageBox.critical(self, "Ошибка", str(e))
                         break
 
+        elif self.table_name == 'services':
+            # Загружаем данные сервиса
+            loop = self.window().loop
+            if loop and loop.is_running():
+                future = asyncio.run_coroutine_threadsafe(
+                    self._get_service_details(record_id),
+                    loop
+                )
+                try:
+                    service_data = future.result()
+                    if not service_data:
+                        QMessageBox.warning(self, "Ошибка", 
+                            "Не удалось загрузить данные услуги")
+                        return
+                except Exception as e:
+                    print(f"Error loading service details: {str(e)}")
+                    QMessageBox.critical(self, "Ошибка", 
+                        "Не удалось загрузить данные услуги")
+                    return
+
+            dialog = ServiceInputDialog(self.db.pool, service_data, self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                data = dialog.get_data()
+                # Изменяем проверку на новые поля
+                if not data['name'] or (
+                    (data['duration_unit'] == 'minutes' and data['duration_value'] < 15) or
+                    (data['duration_unit'] == 'days' and data['duration_value'] < 1)
+                ):
+                    QMessageBox.warning(self, "Предупреждение", 
+                        "Необходимо указать название услуги и корректную длительность")
+                    return
+
+                future = asyncio.run_coroutine_threadsafe(
+                    self._update_service(record_id, data),
+                    loop
+                )
+                try:
+                    result = future.result()
+                    if result.get('success'):
+                        QMessageBox.information(self, "Успех", 
+                            "Услуга успешно обновлена")
+                    else:
+                        QMessageBox.warning(self, "Ошибка", 
+                            result.get('error', 'Неизвестная ошибка'))
+                except Exception as e:
+                    print(f"Error: {str(e)}")
+                    QMessageBox.critical(self, "Ошибка", str(e))
+
     async def _get_model_details(self, model_id):
         async with self.db.pool.acquire() as conn:
             return await conn.fetchrow(
@@ -712,6 +804,29 @@ class TableTab(QWidget):
             print(f"Error in _update_box: {str(e)}")
             return {'error': str(e)}
 
+    async def _get_service_details(self, service_id):
+        async with self.db.pool.acquire() as conn:
+            return await conn.fetchrow(
+                'SELECT * FROM get_service_details($1)',
+                service_id
+            )
+
+    async def _update_service(self, service_id, data):
+        try:
+            async with self.db.pool.acquire() as conn:
+                await conn.execute(
+                    'CALL update_service($1, $2, $3, $4)',
+                    service_id,
+                    data['name'],
+                    data['duration_value'],
+                    data['duration_unit']
+                )
+                await self._refresh_data()
+                return {'success': True}
+        except Exception as e:
+            print(f"Error in _update_service: {str(e)}")
+            return {'error': str(e)}
+
     def _on_task_complete(self, future):
         try:
             result = future.result()
@@ -775,7 +890,7 @@ class TableTab(QWidget):
                 # Если телефона нет, добавляем пользователя
                 await conn.execute('CALL add_user($1, $2)', username, phone)
                 user = await conn.fetchrow(
-                    'SELECT * FROM users WHERE username = $1 AND phone_number = $2',
+                    'SELECT * FROM find_user_by_credentials($1, $2)',
                     username, phone
                 )
                 
@@ -848,7 +963,7 @@ class TableTab(QWidget):
             async with self.db.pool.acquire() as conn:
                 # Проверяем существование с учетом регистра
                 existing_status = await conn.fetchrow(
-                    'SELECT * FROM work_status WHERE normalize_string(status) = normalize_string($1) AND id != $2',
+                    'SELECT * FROM check_status_exists_except($1, $2)',
                     new_status, status_id
                 )
 
@@ -964,52 +1079,37 @@ class TableTab(QWidget):
     async def _add_service(self, data):
         try:
             async with self.db.pool.acquire() as conn:
-                # Для нового бокса используем сохраненную вместимость из диалога
-                if data['is_new_box']:
-                    await conn.execute(
-                        'CALL add_service_with_box($1, $2, $3, $4)',
-                        data['name'],
-                        data['duration'],
-                        data['box_type'],
-                        data['box_capacity']
-                    )
-
-                    # Обновляем таблицу boxes
-                    boxes_tab = self.window().tables.get('Boxes')
-                    if boxes_tab:
-                        await boxes_tab._refresh_data()
-                else:
-                    await conn.execute(
-                        'CALL add_service_with_box($1, $2, $3)',
-                        data['name'],
-                        data['duration'],
-                        data['box_type']
-                    )
-                
+                await conn.execute(
+                    'CALL add_service($1, $2, $3)',
+                    data['name'],
+                    data['duration_value'],
+                    data['duration_unit']
+                )
                 await self._refresh_data()
                 return {'success': True}
         except Exception as e:
-            print(f"Error in _add_service: {str(e)}")
             return {'error': str(e)}
-
-    def closeEvent(self, event):
-        self.refresh_timer.stop()  # Останавливаем таймер при закрытии
-        super().closeEvent(event)
+            
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.db = DatabaseConnection()
         self.setWindowTitle("Детейлинг-студия")
         self.setGeometry(100, 100, 1200, 800)
         
+        # База данных
+        self.db = DatabaseConnection()
+        
+        # Создаем центральный виджет и его layout
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
         
+        # Создаем TabWidget для вкладок
         tabs = QTabWidget()
         layout.addWidget(tabs)
         
+        # Инициализируем все таблицы
         self.tables = {
             'Work Status': TableTab(self.db, 'work_status', ['ID', 'Status']),
             'Car Brands': TableTab(self.db, 'car_brands', ['ID', 'Brand']),
@@ -1017,14 +1117,16 @@ class MainWindow(QMainWindow):
             'Car Colors': TableTab(self.db, 'car_colors', ['ID', 'Color']),
             'Car Wraps': TableTab(self.db, 'car_wraps', ['ID', 'Status']),
             'Car Repaints': TableTab(self.db, 'car_repaints', ['ID', 'Status']),
+            'Car Repaint Links': TableTab(self.db, 'car_repaint_links', ['Car ID', 'Repaint ID']),
             'Boxes': TableTab(self.db, 'boxes', ['ID', 'Type', 'Capacity']),
-            'Services': TableTab(self.db, 'services', ['ID', 'Name', 'Duration', 'Box ID']),
+            'Services': TableTab(self.db, 'services', ['ID', 'Name', 'Duration']),
             'Users': TableTab(self.db, 'users', ['ID', 'Username', 'Phone']),
             'Cars': TableTab(self.db, 'cars', ['Plate', 'User ID', 'Model ID', 'Year', 'Color ID', 'Wrap ID', 'Repaint ID']),
             'Bookings': TableTab(self.db, 'bookings', ['ID', 'Box ID', 'User ID', 'Plate', 'Date', 'Status ID']),
             'Book Services': TableTab(self.db, 'book_services', ['Booking ID', 'Service ID'])
         }
         
+        # Добавляем все таблицы на вкладки
         for name, widget in self.tables.items():
             tabs.addTab(widget, name)
         

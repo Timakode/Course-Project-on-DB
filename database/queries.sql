@@ -54,16 +54,32 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Проверка названия услуги
+-- Удаляем старые функции
+DROP FUNCTION IF EXISTS get_service_details(integer);
+DROP FUNCTION IF EXISTS check_service_exists(text);
+
+-- Обновляем функции для работы с services
 CREATE OR REPLACE FUNCTION check_service_exists(p_name TEXT)
 RETURNS TABLE (
     id INTEGER,
     name TEXT,
-    duration INTEGER,
-    box_id INTEGER
+    duration validated_duration  -- Изменяем тип на validated_duration
 ) AS $$
-    SELECT * FROM services 
+    SELECT id, name, duration 
+    FROM services 
     WHERE normalize_string(name) = normalize_string($1);
+$$ LANGUAGE SQL;
+
+-- Получение данных сервиса для редактирования
+CREATE OR REPLACE FUNCTION get_service_details(p_service_id INTEGER)
+RETURNS TABLE (
+    id INTEGER,
+    name TEXT,
+    duration validated_duration  -- Изменяем тип на validated_duration
+) AS $$
+    SELECT s.id, s.name, s.duration
+    FROM services s
+    WHERE s.id = $1;
 $$ LANGUAGE SQL;
 
 -- Проверка типа бокса
@@ -236,4 +252,198 @@ RETURNS TABLE (
     SELECT id, status FROM car_repaints 
     WHERE normalize_string(status) = normalize_string($1) 
     AND id != $2;
+$$ LANGUAGE SQL;
+
+-- Функция проверки существования статуса с учетом регистра
+CREATE OR REPLACE FUNCTION check_status_exists_except(
+    p_status TEXT,
+    p_id INTEGER
+) RETURNS TABLE (
+    id INTEGER,
+    status TEXT
+) AS $$
+    SELECT id, status 
+    FROM work_status 
+    WHERE normalize_string(status) = normalize_string($1) 
+    AND id != $2;
+$$ LANGUAGE SQL;
+
+-- Функция поиска пользователя по username и phone
+CREATE OR REPLACE FUNCTION find_user_by_credentials(
+    p_username TEXT,
+    p_phone TEXT
+) RETURNS TABLE (
+    id INTEGER,
+    username TEXT,
+    phone_number TEXT
+) AS $$
+    SELECT id, username, phone_number
+    FROM users 
+    WHERE username = $1 AND phone_number = $2;
+$$ LANGUAGE SQL;
+
+-- Функция получения деталей сервиса
+CREATE OR REPLACE FUNCTION get_services_list()
+RETURNS TABLE (
+    id INTEGER,
+    name TEXT,
+    duration_value INTEGER,
+    duration_unit duration_unit
+) AS $$
+    SELECT 
+        id, 
+        name,
+        (duration).value,  -- Используем правильный синтаксис для доступа к полям
+        (duration).unit    -- составного типа
+    FROM services
+    ORDER BY id;
+$$ LANGUAGE SQL;
+
+-- Переписываем функцию проверки номера машины полностью
+CREATE OR REPLACE FUNCTION check_plate_number_exists(p_plate TEXT) 
+RETURNS BOOLEAN AS $$
+DECLARE
+    v_exists BOOLEAN;
+    v_normalized_plate TEXT;
+BEGIN
+    -- Нормализуем входной номер
+    v_normalized_plate := LOWER(TRIM(p_plate));
+    
+    -- Добавляем отладочную информацию
+    RAISE NOTICE 'Checking plate: %, normalized: %', p_plate, v_normalized_plate;
+    
+    -- Проверяем существование
+    SELECT EXISTS (
+        SELECT 1 
+        FROM cars 
+        WHERE LOWER(TRIM(plate_number)) = v_normalized_plate
+    ) INTO v_exists;
+    
+    -- Добавляем отладочную информацию
+    RAISE NOTICE 'Result: %', v_exists;
+    
+    RETURN v_exists;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Получение пользователей по номеру телефона
+CREATE OR REPLACE FUNCTION get_users_by_phone(p_phone TEXT)
+RETURNS TABLE (
+    id INTEGER,
+    username TEXT,
+    phone_number TEXT
+) AS $$
+    SELECT id, username, phone_number 
+    FROM users 
+    WHERE phone_number LIKE '%' || p_phone || '%'
+    ORDER BY username;
+$$ LANGUAGE SQL;
+
+-- Получение моделей с брендами
+CREATE OR REPLACE FUNCTION get_models_with_brands()
+RETURNS TABLE (
+    model_id INTEGER,
+    model_name TEXT,
+    brand_name TEXT
+) AS $$
+    SELECT m.id, m.model, b.brand
+    FROM car_models m
+    JOIN car_brands b ON m.brand_id = b.id
+    ORDER BY b.brand, m.model;
+$$ LANGUAGE SQL;
+
+-- Исправляем функцию получения или создания цвета
+CREATE OR REPLACE FUNCTION get_or_create_color(p_color TEXT)
+RETURNS INTEGER AS $$
+DECLARE
+    v_color_id INTEGER;
+    v_normalized_color TEXT;
+BEGIN
+    -- Нормализуем название цвета
+    v_normalized_color := normalize_string(p_color);
+    
+    -- Добавляем отладочную информацию
+    RAISE NOTICE 'Getting or creating color: %, normalized: %', p_color, v_normalized_color;
+    
+    -- Пытаемся найти существующий цвет
+    SELECT id INTO v_color_id 
+    FROM car_colors 
+    WHERE normalize_string(color) = v_normalized_color;
+    
+    -- Если цвет не найден, создаем новый
+    IF NOT FOUND THEN
+        INSERT INTO car_colors (color) 
+        VALUES (p_color)
+        RETURNING id INTO v_color_id;
+        
+        RAISE NOTICE 'Created new color with ID: %', v_color_id;
+    ELSE
+        RAISE NOTICE 'Found existing color with ID: %', v_color_id;
+    END IF;
+    
+    RETURN v_color_id;
+EXCEPTION
+    WHEN unique_violation THEN
+        -- В случае конкурентной вставки пробуем найти снова
+        SELECT id INTO v_color_id 
+        FROM car_colors 
+        WHERE normalize_string(color) = v_normalized_color;
+        
+        RAISE NOTICE 'Resolved concurrent insert, using ID: %', v_color_id;
+        RETURN v_color_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Получение доступных элементов перекраса
+CREATE OR REPLACE FUNCTION get_available_repaints(p_car_id TEXT)
+RETURNS TABLE (
+    id INTEGER,
+    status TEXT
+) AS $$
+    SELECT id, status FROM car_repaints
+    WHERE id NOT IN (
+        SELECT repaint_id FROM car_repaint_links 
+        WHERE car_id = p_car_id
+    )
+    ORDER BY status;
+$$ LANGUAGE SQL;
+
+-- Получение доступных элементов оклейки
+CREATE OR REPLACE FUNCTION get_available_wraps(p_car_id TEXT)
+RETURNS TABLE (
+    id INTEGER,
+    status TEXT
+) AS $$
+    SELECT id, status FROM car_wraps
+    ORDER BY status;
+$$ LANGUAGE SQL;
+
+-- Получение списка всех пользователей
+CREATE OR REPLACE FUNCTION get_all_users()
+RETURNS TABLE (
+    id INTEGER,
+    username TEXT,
+    phone_number TEXT
+) AS $$
+    SELECT id, username, phone_number 
+    FROM users 
+    ORDER BY username;
+$$ LANGUAGE SQL;
+
+-- Получение всех доступных элементов перекраса
+CREATE OR REPLACE FUNCTION get_all_repaints()
+RETURNS TABLE (
+    id INTEGER,
+    status TEXT
+) AS $$
+    SELECT id, status FROM car_repaints ORDER BY status;
+$$ LANGUAGE SQL;
+
+-- Получение всех доступных элементов оклейки
+CREATE OR REPLACE FUNCTION get_all_wraps()
+RETURNS TABLE (
+    id INTEGER,
+    status TEXT
+) AS $$
+    SELECT id, status FROM car_wraps ORDER BY status;
 $$ LANGUAGE SQL;
