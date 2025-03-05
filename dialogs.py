@@ -519,261 +519,417 @@ class CarPartsWidget(QWidget):
                 result[f"part_{row}"] = combo.currentText()
         return result
 
-class CarInputDialog(QDialog):
-    def __init__(self, pool, parent=None):
+class CarDialog(QDialog):
+    def __init__(self, pool, loop, car_data=None, parent=None):  # Add loop parameter
         super().__init__(parent)
         self.pool = pool
-        self.parent = parent  # Сохраняем ссылку на родителя
-        self.setWindowTitle("Добавление автомобиля")
+        self.loop = loop  # Store the loop
+        self.setWindowTitle("Автомобиль")
         self.setMinimumWidth(400)
         
         layout = QVBoxLayout(self)
         
-        # Основные поля
-        form = QFormLayout()
+        # Поля ввода
         self.plate_edit = QLineEdit()
+        self.plate_edit.setPlaceholderText("А000АА000")
         self.user_combo = QComboBox()
         self.model_combo = QComboBox()
         self.year_spin = QSpinBox()
+        self.year_spin.setRange(1900, QDate.currentDate().year())
+        self.year_spin.setValue(QDate.currentDate().year())
         self.color_combo = QComboBox()
+        self.color_combo.setEditable(True)  # Делаем редактируемым
+        self.color_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)  # Запрещаем автоматическую вставку
         self.wrap_combo = QComboBox()
-        
-        form.addRow("Номер авто:", self.plate_edit)
-        form.addRow("Владелец:", self.user_combo)
-        form.addRow("Модель:", self.model_combo)
-        form.addRow("Год выпуска:", self.year_spin)
-        form.addRow("Цвет:", self.color_combo)
-        form.addRow("Оклейка:", self.wrap_combo)
-        
-        # Секция перекраса
-        repaint_group = QGroupBox("Перекрас")
-        repaint_layout = QVBoxLayout()
+        self.wrap_combo.setEditable(True)  # Делаем комбобокс редактируемым
+        self.wrap_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.repaint_combo = QComboBox()
-        self.additional_repaint_combo = QComboBox()
-        self.additional_repaint_check = QCheckBox("Добавить дополнительный элемент")
-        repaint_layout.addWidget(self.repaint_combo)
-        repaint_layout.addWidget(self.additional_repaint_check)
-        repaint_layout.addWidget(self.additional_repaint_combo)
-        self.additional_repaint_combo.setEnabled(False)
-        repaint_group.setLayout(repaint_layout)
+        self.repaint_combo.setEditable(True)  # Делаем комбобокс редактируемым
+        self.repaint_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)  # Запрещаем автоматическую вставку
         
-        layout.addLayout(form)
-        layout.addWidget(repaint_group)
+        # Формируем layout
+        form_layout = QFormLayout()
+        form_layout.addRow("Номер авто:", self.plate_edit)
+        form_layout.addRow("Владелец:", self.user_combo)
+        form_layout.addRow("Модель:", self.model_combo)
+        form_layout.addRow("Год выпуска:", self.year_spin)
+        form_layout.addRow("Цвет:", self.color_combo)
+        form_layout.addRow("Статус оклейки:", self.wrap_combo)
+
+        # Создаем контейнер для статусов перекраса
+        repaint_group = QGroupBox("Статусы перекраса")
+        repaint_group.setObjectName("repaint_group")  # Добавляем имя объекта
+        repaint_layout = QVBoxLayout()
+        
+        # Список для хранения комбобоксов
+        self.repaint_combos = []
+        
+        # Добавляем первый комбобокс
+        first_combo = QComboBox()
+        first_combo.setEditable(True)
+        first_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.repaint_combos.append(first_combo)
+        repaint_layout.addWidget(first_combo)
+        
+        # Кнопки управления статусами
+        btn_layout = QHBoxLayout()
+        add_status_btn = QPushButton("+")
+        remove_status_btn = QPushButton("-")
+        add_status_btn.clicked.connect(self.add_repaint_status)
+        remove_status_btn.clicked.connect(self.remove_repaint_status)
+        btn_layout.addWidget(add_status_btn)
+        btn_layout.addWidget(remove_status_btn)
+        repaint_layout.addLayout(btn_layout)
+        
+        repaint_group.setLayout(repaint_layout)
+        form_layout.addRow(repaint_group)
+
+        layout.addLayout(form_layout)
         
         # Кнопки
-        self.setup_buttons(layout)
-        
-        # Настройка полей и загрузка данных
-        self.setup_fields()
-        
-        # Сигналы
-        self.additional_repaint_check.stateChanged.connect(
-            lambda state: self.additional_repaint_combo.setEnabled(state == Qt.CheckState.Checked)
-        )
-        
-        # Загружаем данные асинхронно через event loop
-        loop = parent.window().loop
-        if loop and loop.is_running():
-            future = asyncio.run_coroutine_threadsafe(
-                self.load_initial_data(),
-                loop
-            )
-            try:
-                future.result()
-            except Exception as e:
-                print(f"Error loading initial data: {str(e)}")
-                QMessageBox.critical(self, "Ошибка", 
-                    "Не удалось загрузить начальные данные")
-
-    async def load_initial_data(self):
-        try:
-            async with self.pool.acquire() as conn:
-                # Загружаем пользователей
-                users = await conn.fetch('SELECT * FROM get_all_users()')
-                self.user_combo.clear()
-                for user in users:
-                    self.user_combo.addItem(
-                        f"{user['username']} ({user['phone_number']})", 
-                        user['id']
-                    )
-                
-                # Загружаем модели
-                models = await conn.fetch('SELECT * FROM get_models_with_brands()')
-                self.model_combo.clear()
-                for model in models:
-                    self.model_combo.addItem(
-                        f"{model['brand_name']} {model['model_name']}", 
-                        model['model_id']
-                    )
-                
-                # Загружаем цвета
-                colors = await conn.fetch('SELECT * FROM car_colors ORDER BY color')
-                self.color_combo.clear()
-                for color in colors:
-                    self.color_combo.addItem(color['color'])
-                
-                # Загружаем элементы оклейки
-                wraps = await conn.fetch('SELECT * FROM get_all_wraps()')
-                self.wrap_combo.clear()
-                for wrap in wraps:
-                    self.wrap_combo.addItem(wrap['status'], wrap['id'])
-                
-                # Загружаем элементы перекраса
-                repaints = await conn.fetch('SELECT * FROM get_all_repaints()')
-                for combo in [self.repaint_combo, self.additional_repaint_combo]:
-                    combo.clear()
-                    for repaint in repaints:
-                        combo.addItem(repaint['status'], repaint['id'])
-        
-        except Exception as e:
-            print(f"Error loading initial data: {str(e)}")
-            QMessageBox.critical(self, "Ошибка", 
-                "Не удалось загрузить начальные данные")
-
-    def get_data(self):
-        # Собираем ID элементов перекраса
-        repaint_ids = [self.repaint_combo.currentData()]
-        if self.additional_repaint_check.isChecked():
-            repaint_ids.append(self.additional_repaint_combo.currentData())
-        
-        return {
-            'plate_number': self.plate_edit.text().strip(),
-            'user_id': self.user_combo.currentData(),
-            'model_id': self.model_combo.currentData(),
-            'year': self.year_spin.value(),
-            'color': self.color_combo.currentText().strip(),
-            'wrap_id': self.wrap_combo.currentData(),
-            'repaint_ids': repaint_ids
-        }
-
-    def setup_fields(self):
-        current_year = QDate.currentDate().year()
-        self.year_spin.setRange(1900, current_year)
-        self.year_spin.setValue(current_year)
-        
-        self.user_combo.setEditable(True)
-        self.color_combo.setEditable(True)
-        
-        self.user_combo.addItem("Новый пользователь", -1)
-        self.model_combo.addItem("Новая модель", -1)
-
-    def setup_buttons(self, layout):
         btn_layout = QHBoxLayout()
         save_btn = QPushButton("Сохранить")
         cancel_btn = QPushButton("Отмена")
-        save_btn.clicked.connect(self.validate_and_save)
+        save_btn.clicked.connect(self.validate_and_accept)
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(save_btn)
         btn_layout.addWidget(cancel_btn)
         layout.addLayout(btn_layout)
-
-    def connect_signals(self):
-        self.phone_search.textChanged.connect(self.search_users)
-        self.user_combo.currentIndexChanged.connect(self.on_user_selected)
-
-    async def search_users(self, phone):
-        if not phone:
-            return
         
-        async with self.pool.acquire() as conn:
-            users = await conn.fetch('SELECT * FROM get_users_by_phone($1)', phone)
-            self.user_combo.clear()
-            self.user_combo.addItem("Новый пользователь", -1)
-            for user in users:
-                self.user_combo.addItem(
-                    f"{user['username']} ({user['phone_number']})", 
-                    user['id']
-                )
+        # Сохраняем данные для установки после загрузки
+        self.car_data = car_data
+        
+        # Используем переданный loop вместо window().loop
+        self.loop.create_task(self.load_data())
 
-    def on_user_selected(self, index):
-        if self.user_combo.currentData() == -1:
-            dialog = AddUserDialog(self)
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                user_data = dialog.get_data()
-                # Добавляем нового пользователя
-                loop = self.parent.window().loop
-                if loop and loop.is_running():
-                    future = asyncio.run_coroutine_threadsafe(
-                        self._add_new_user(user_data),
-                        loop
-                    )
-                    try:
-                        result = future.result()
-                        if result.get('success'):
-                            QMessageBox.information(self, "Успех", 
-                                "Пользователь успешно добавлен")
-                            # Обновляем список пользователей
-                            self.search_users(user_data['phone_number'])
-                        else:
-                            QMessageBox.warning(self, "Ошибка", 
-                                result.get('error'))
-                    except Exception as e:
-                        QMessageBox.critical(self, "Ошибка", str(e))
+        # Добавим отладочный вывод
+        print("Initializing CarDialog...")
+        
+        # После создания интерфейса сразу загрузим данные
+        future = asyncio.run_coroutine_threadsafe(self.load_data(), self.loop)
+        try:
+            future.result()  # Дождемся загрузки данных
+            print("Data loaded successfully")
+        except Exception as e:
+            print(f"Error loading data: {str(e)}")
 
-    async def _add_new_user(self, user_data):
+    def add_repaint_status(self):
+        """Добавляет новый комбобокс для статуса перекраса"""
+        combo = QComboBox()
+        combo.setEditable(True)
+        combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        
+        # Копируем items из первого комбобокса
+        if self.repaint_combos:
+            first_combo = self.repaint_combos[0]
+            for i in range(first_combo.count()):
+                combo.addItem(first_combo.itemText(i), first_combo.itemData(i))
+        
+        # Используем правильное имя объекта для поиска
+        layout = self.findChild(QGroupBox, "repaint_group").layout()
+        layout.insertWidget(len(self.repaint_combos), combo)
+        self.repaint_combos.append(combo)
+
+    def remove_repaint_status(self):
+        """Удаляет последний добавленный комбобокс"""
+        if len(self.repaint_combos) > 1:  # Всегда оставляем хотя бы один комбобокс
+            combo = self.repaint_combos.pop()
+            combo.deleteLater()
+
+    async def load_data(self):
+        print("Starting load_data...")
         try:
             async with self.pool.acquire() as conn:
-                result = await conn.fetchrow(
-                    'SELECT * FROM add_user($1, $2)',
-                    user_data['username'],
-                    user_data['phone_number']
-                )
-                return {'success': True, 'id': result['id']}
+                # Загружаем пользователей
+                users = await conn.fetch('SELECT * FROM get_users_for_combo()')
+                print(f"Loaded {len(users)} users")
+                
+                self.user_combo.clear()
+                for user in users:
+                    print(f"Adding user: {user['display_name']}")
+                    self.user_combo.addItem(user['display_name'], user['id'])
+                
+                # Загружаем модели с брендами
+                models = await conn.fetch('SELECT * FROM get_models_for_combo()')
+                self.model_combo.clear()
+                for model in models:
+                    self.model_combo.addItem(model['display_name'], model['id'])
+                
+                # Загружаем цвета
+                colors = await conn.fetch('SELECT * FROM get_colors_for_combo()')
+                self.color_combo.clear()
+                for color in colors:
+                    self.color_combo.addItem(color['color'], color['id'])
+                
+                # Загружаем статусы оклейки
+                wraps = await conn.fetch('SELECT * FROM get_wraps_for_combo()')
+                self.wrap_combo.clear()
+                for wrap in wraps:
+                    self.wrap_combo.addItem(wrap['status'], wrap['id'])
+                
+                # Загружаем статусы перекраса
+                repaints = await conn.fetch('SELECT * FROM get_repaints_for_combo()')
+                for combo in self.repaint_combos:
+                    combo.clear()
+                    for repaint in repaints:
+                        combo.addItem(repaint['status'], repaint['id'])
+                
+                # Если есть данные для редактирования, устанавливаем их
+                if self.car_data:
+                    self.plate_edit.setText(self.car_data['plate_number'])
+                    self.year_spin.setValue(self.car_data['year'])
+                    self.set_combo_value(self.user_combo, self.car_data['user_id'])
+                    self.set_combo_value(self.model_combo, self.car_data['model_id'])
+                    self.set_combo_value(self.color_combo, self.car_data['color_id'])
+                    self.set_combo_value(self.wrap_combo, self.car_data['wrap_id'])
+                    self.set_combo_value(self.repaint_combo, self.car_data['repaint_id'])
+        
         except Exception as e:
+            print(f"Error in load_data: {str(e)}")
+            raise
+    
+    def set_combo_value(self, combo: QComboBox, value):
+        index = combo.findData(value)
+        if index >= 0:
+            combo.setCurrentIndex(index)
+    
+    def validate_and_accept(self):
+        # Проверяем номер авто
+        plate = self.plate_edit.text().strip().upper()
+        if not plate or not plate.replace(' ', ''):
+            QMessageBox.warning(self, "Ошибка", "Введите номер автомобиля")
+            return False
+        
+        # Проверяем обязательные поля
+        if self.user_combo.currentIndex() == -1:
+            QMessageBox.warning(self, "Ошибка", "Выберите владельца")
+            return False
+        
+        if self.model_combo.currentIndex() == -1:
+            QMessageBox.warning(self, "Ошибка", "Выберите модель")
+            return False
+
+        # Обрабатываем цвет
+        color_text = self.color_combo.currentText().strip()
+        if not color_text:
+            QMessageBox.warning(self, "Ошибка", "Введите цвет")
+            return False
+
+        try:
+            # Пытаемся получить ID цвета или создать новый
+            future = asyncio.run_coroutine_threadsafe(
+                self._get_or_create_color(color_text),
+                self.loop
+            )
+            result = future.result()
+            if result.get('success'):
+                # Обновляем комбобокс - находим индекс по ID
+                index = self.color_combo.findData(result['id'])
+                if index >= 0:
+                    self.color_combo.setCurrentIndex(index)
+                else:
+                    # Если цвет новый - добавляем его в комбобокс
+                    self.color_combo.addItem(color_text, result['id'])
+                    self.color_combo.setCurrentIndex(self.color_combo.count() - 1)
+            else:
+                QMessageBox.warning(self, "Ошибка", result.get('error', 'Неизвестная ошибка'))
+                return False
+        except Exception as e:
+            print(f"Error processing color: {str(e)}")
+            QMessageBox.critical(self, "Ошибка", str(e))
+            return False
+
+        # Обрабатываем статус оклейки
+        wrap_text = self.wrap_combo.currentText().strip()
+        if not wrap_text:
+            QMessageBox.warning(self, "Ошибка", "Введите статус оклейки")
+            return False
+
+        try:
+            # Пытаемся получить ID статуса оклейки или создать новый
+            future = asyncio.run_coroutine_threadsafe(
+                self._get_or_create_wrap(wrap_text),
+                self.loop
+            )
+            result = future.result()
+            if result.get('success'):
+                # Обновляем комбобокс - находим индекс по ID
+                index = self.wrap_combo.findData(result['id'])
+                if index >= 0:
+                    self.wrap_combo.setCurrentIndex(index)
+                else:
+                    # Если статус новый - добавляем его в комбобокс
+                    self.wrap_combo.addItem(wrap_text, result['id'])
+                    self.wrap_combo.setCurrentIndex(self.wrap_combo.count() - 1)
+            else:
+                QMessageBox.warning(self, "Ошибка", result.get('error', 'Неизвестная ошибка'))
+                return False
+        except Exception as e:
+            print(f"Error processing wrap status: {str(e)}")
+            QMessageBox.critical(self, "Ошибка", str(e))
+            return False
+
+        # Обрабатываем статусы перекраса
+        valid_statuses = []
+        for combo in self.repaint_combos:
+            repaint_text = combo.currentText().strip()
+            if repaint_text:
+                try:
+                    future = asyncio.run_coroutine_threadsafe(
+                        self._get_or_create_repaint(repaint_text),
+                        self.loop
+                    )
+                    result = future.result()
+                    if result.get('success'):
+                        # Обновляем комбобокс
+                        index = combo.findData(result['id'])
+                        if index >= 0:
+                            combo.setCurrentIndex(index)
+                        else:
+                            combo.addItem(repaint_text, result['id'])
+                            combo.setCurrentIndex(combo.count() - 1)
+                        valid_statuses.append(result['id'])
+                    else:
+                        QMessageBox.warning(self, "Ошибка", result.get('error', 'Неизвестная ошибка'))
+                        return False
+                except Exception as e:
+                    print(f"Error processing repaint status: {str(e)}")
+                    QMessageBox.critical(self, "Ошибка", str(e))
+                    return False
+
+        if not valid_statuses:
+            QMessageBox.warning(self, "Ошибка", "Введите хотя бы один статус перекраса")
+            return False
+
+        self.accept()
+        return True
+
+    async def _get_or_create_color(self, color_name):
+        try:
+            async with self.pool.acquire() as conn:
+                # Пытаемся найти существующий цвет
+                existing_color = await conn.fetchrow(
+                    'SELECT id FROM car_colors WHERE normalize_string(color) = normalize_string($1)',
+                    color_name
+                )
+                
+                if existing_color:
+                    return {'success': True, 'id': existing_color['id']}
+                
+                # Если цвет не найден, создаем новый
+                await conn.execute('CALL add_car_color($1)', color_name)
+                
+                # Получаем ID нового цвета
+                new_color = await conn.fetchrow(
+                    'SELECT id FROM car_colors WHERE normalize_string(color) = normalize_string($1)',
+                    color_name
+                )
+                
+                if new_color:
+                    # Обновляем таблицу цветов
+                    main_window = self.window()
+                    if hasattr(main_window, 'tables'):
+                        colors_tab = main_window.tables.get('Car Colors')
+                        if colors_tab:
+                            await colors_tab._refresh_data()
+                    
+                    return {'success': True, 'id': new_color['id']}
+                else:
+                    return {'error': 'Failed to add new color'}
+
+        except Exception as e:
+            print(f"Error in _get_or_create_color: {str(e)}")
             return {'error': str(e)}
 
-    def validate_and_save(self):
-        # Проверяем обязательные поля
-        if not self.plate_edit.text().strip():
-            QMessageBox.warning(self, "Ошибка", "Введите номер автомобиля")
-            return
-        
-        if self.user_combo.currentData() == -1:
-            QMessageBox.warning(self, "Ошибка", "Выберите пользователя")
-            return
-        
-        if self.model_combo.currentData() == -1:
-            QMessageBox.warning(self, "Ошибка", "Выберите модель")
-            return
-        
-        # Если все проверки пройдены, сохраняем данные
-        loop = self.parent.window().loop
-        if loop and loop.is_running():
-            future = asyncio.run_coroutine_threadsafe(
-                self._save_car(),
-                loop
-            )
-            try:
-                result = future.result()
-                if result.get('success'):
-                    self.accept()
+    async def _get_or_create_wrap(self, wrap_status):
+        try:
+            async with self.pool.acquire() as conn:
+                # Пытаемся найти существующий статус
+                existing_wrap = await conn.fetchrow(
+                    'SELECT id FROM car_wraps WHERE normalize_string(status) = normalize_string($1)',
+                    wrap_status
+                )
+                
+                if existing_wrap:
+                    return {'success': True, 'id': existing_wrap['id']}
+                
+                # Если статус не найден, создаем новый
+                await conn.execute('CALL add_car_wrap($1)', wrap_status)
+                
+                # Получаем ID нового статуса
+                new_wrap = await conn.fetchrow(
+                    'SELECT id FROM car_wraps WHERE normalize_string(status) = normalize_string($1)',
+                    wrap_status
+                )
+                
+                if new_wrap:
+                    # Обновляем таблицу статусов оклейки
+                    main_window = self.window()
+                    if hasattr(main_window, 'tables'):
+                        wraps_tab = main_window.tables.get('Car Wraps')
+                        if wraps_tab:
+                            await wraps_tab._refresh_data()
+                    
+                    return {'success': True, 'id': new_wrap['id']}
                 else:
-                    QMessageBox.warning(self, "Ошибка", 
-                        result.get('error', 'Неизвестная ошибка'))
-            except Exception as e:
-                QMessageBox.critical(self, "Ошибка", str(e))
+                    return {'error': 'Failed to add new wrap status'}
+
+        except Exception as e:
+            print(f"Error in _get_or_create_wrap: {str(e)}")
+            return {'error': str(e)}
+
+    async def _get_or_create_repaint(self, repaint_status):
+        try:
+            async with self.pool.acquire() as conn:
+                # Пытаемся найти существующий статус
+                existing_repaint = await conn.fetchrow(
+                    'SELECT id FROM car_repaints WHERE normalize_string(status) = normalize_string($1)',
+                    repaint_status
+                )
+                
+                if existing_repaint:
+                    return {'success': True, 'id': existing_repaint['id']}
+                
+                # Если статус не найден, создаем новый
+                await conn.execute('CALL add_car_repaint($1)', repaint_status)
+                
+                # Получаем ID нового статуса
+                new_repaint = await conn.fetchrow(
+                    'SELECT id FROM car_repaints WHERE normalize_string(status) = normalize_string($1)',
+                    repaint_status
+                )
+                
+                if new_repaint:
+                    # Обновляем таблицу статусов перекраса
+                    main_window = self.window()
+                    if hasattr(main_window, 'tables'):
+                        repaints_tab = main_window.tables.get('Car Repaints')
+                        if repaints_tab:
+                            await repaints_tab._refresh_data()
+                    
+                    return {'success': True, 'id': new_repaint['id']}
+                else:
+                    return {'error': 'Failed to add new repaint status'}
+
+        except Exception as e:
+            print(f"Error in _get_or_create_repaint: {str(e)}")
+            return {'error': str(e)}
 
     def get_data(self):
-        return {
-            'plate_number': self.plate_edit.text().strip(),
+        data = {
+            'plate_number': self.plate_edit.text().strip().upper(),
             'user_id': self.user_combo.currentData(),
             'model_id': self.model_combo.currentData(),
             'year': self.year_spin.value(),
-            'color': self.color_combo.currentText().strip(),  # Передаем строку с цветом
+            'color_id': self.color_combo.currentData(),
             'wrap_id': self.wrap_combo.currentData(),
-            'repaint_ids': [self.repaint_combo.currentData()]
-            if not self.additional_repaint_check.isChecked()
-            else [self.repaint_combo.currentData(), self.additional_repaint_combo.currentData()]
+            'repaint_statuses': []  # Больше не нужен repaint_id
         }
+        for combo in self.repaint_combos:
+            if combo.currentText().strip():
+                data['repaint_statuses'].append({
+                    'text': combo.currentText().strip(),
+                    'id': combo.currentData()
+                })
+        return data
 
-    async def _get_color_id(self, color_name):  # Add color_name parameter
-        async with self.pool.acquire() as conn:
-            return await conn.fetchval(
-                'SELECT get_or_create_color($1)',
-                color_name
-            )
-
-    def on_color_changed(self, text):
-        # Этот метод можно использовать для валидации или 
-        # автоматического создания нового цвета
-        pass

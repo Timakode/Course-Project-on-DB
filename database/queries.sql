@@ -447,3 +447,65 @@ RETURNS TABLE (
 ) AS $$
     SELECT id, status FROM car_wraps ORDER BY status;
 $$ LANGUAGE SQL;
+
+
+-- Исправляем функцию получения пользователей для комбобокса
+CREATE OR REPLACE FUNCTION get_users_for_combo()
+RETURNS TABLE (
+    id INTEGER,
+    display_name TEXT
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        u.id,
+        u.username || ' (' || u.phone_number || ')' AS display_name
+    FROM users u
+    ORDER BY u.username;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Получение списка моделей с брендами для комбобокса автомобиля
+CREATE OR REPLACE FUNCTION get_models_for_combo()
+RETURNS TABLE (
+    id INTEGER,
+    display_name TEXT
+) AS $$
+    SELECT m.id, b.brand || ' ' || m.model as display_name 
+    FROM car_models m 
+    JOIN car_brands b ON m.brand_id = b.id 
+    ORDER BY b.brand, m.model;
+$$ LANGUAGE SQL;
+
+-- Получение цветов для комбобокса автомобиля
+CREATE OR REPLACE FUNCTION get_colors_for_combo()
+RETURNS TABLE (
+    id INTEGER,
+    color TEXT
+) AS $$
+    SELECT id, color 
+    FROM car_colors 
+    ORDER BY color;
+$$ LANGUAGE SQL;
+
+-- Получение статусов оклейки для комбобокса автомобиля
+CREATE OR REPLACE FUNCTION get_wraps_for_combo()
+RETURNS TABLE (
+    id INTEGER,
+    status TEXT
+) AS $$
+    SELECT id, status 
+    FROM car_wraps 
+    ORDER BY status;
+$$ LANGUAGE SQL;
+
+-- Получение статусов перекраса для комбобокса автомобиля
+CREATE OR REPLACE FUNCTION get_repaints_for_combo()
+RETURNS TABLE (
+    id INTEGER,
+    status TEXT
+) AS $$
+    SELECT id, status 
+    FROM car_repaints 
+    ORDER BY status;
+$$ LANGUAGE SQL;

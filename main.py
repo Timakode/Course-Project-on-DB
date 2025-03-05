@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PyQt6.QtCore import (QMetaObject, Qt, Q_ARG, QObject, pyqtSlot, 
                          pyqtSignal, QTimer, QDate)  # Добавляем QDate
 from dialogs import (AddUserDialog, SimpleInputDialog, BoxInputDialog, 
-                     ServiceInputDialog, CarModelDialog, BoxDialog)
+                     ServiceInputDialog, CarModelDialog, BoxDialog, CarDialog)
 import threading
 
 load_dotenv()
@@ -300,36 +300,30 @@ class TableTab(QWidget):
                         break
 
         elif self.table_name == 'cars':
-            from dialogs import CarInputDialog
-            dialog = CarInputDialog(self.db.pool, parent=self)
-            if dialog.exec() == QDialog.DialogCode.Accepted:
+            dialog = CarDialog(self.db.pool, self.window().loop, parent=self)
+            while dialog.exec() == QDialog.DialogCode.Accepted:
                 data = dialog.get_data()
-                
                 loop = self.window().loop
                 if loop and loop.is_running():
-                    future = asyncio.run_coroutine_threadsafe(
-                        self._add_car(data),
-                        loop
-                    )
                     try:
+                        # Добавляем автомобиль
+                        future = asyncio.run_coroutine_threadsafe(
+                            self._add_car_with_refresh(data),
+                            loop
+                        )
                         result = future.result()
                         if result.get('success'):
-                            # Обновляем таблицу сразу после успешного добавления
-                            refresh_future = asyncio.run_coroutine_threadsafe(
-                                self._refresh_data(),
-                                loop
-                            )
-                            # Ждем завершения обновления
-                            refresh_future.result()
-                            
                             QMessageBox.information(self, "Успех", 
                                 "Автомобиль успешно добавлен")
+                            break
                         else:
                             QMessageBox.warning(self, "Ошибка", 
                                 result.get('error', 'Неизвестная ошибка'))
+                            continue
                     except Exception as e:
                         print(f"Error in car addition: {str(e)}")
                         QMessageBox.critical(self, "Ошибка", str(e))
+                        continue
 
     async def _load_brands_for_dialog(self, combo_box):
         async with self.db.pool.acquire() as conn:
@@ -1089,7 +1083,71 @@ class TableTab(QWidget):
                 return {'success': True}
         except Exception as e:
             return {'error': str(e)}
+
+    async def _add_car(self, data):
+        try:
+            async with self.db.pool.acquire() as conn:
+                # Вызываем процедуру добавления автомобиля
+                await conn.execute(
+                    'CALL add_car($1, $2, $3, $4, $5, $6, $7)',
+                    data['plate_number'],
+                    data['user_id'],
+                    data['model_id'],
+                    data['year'],
+                    data['color_id'],
+                    data['wrap_id'],
+                    data['repaint_id']
+                )
+                
+                # Обновляем таблицу
+                await self._refresh_data()
+                return {'success': True}
+                
+        except asyncpg.UniqueViolationError:
+            return {'error': 'Автомобиль с таким номером уже существует'}
+        except Exception as e:
+            print(f"Error in _add_car: {str(e)}")
+            return {'error': str(e)}
             
+    async def _add_car_with_refresh(self, data):
+        try:
+            # Обновляем таблицы перед добавлением
+            colors_tab = self.window().tables.get('Car Colors')
+            wraps_tab = self.window().tables.get('Car Wraps')
+            repaints_tab = self.window().tables.get('Car Repaints')
+            repaint_links_tab = self.window().tables.get('Car Repaint Links')
+            
+            # Обновляем все связанные таблицы перед добавлением
+            for tab in [colors_tab, wraps_tab, repaints_tab, repaint_links_tab]:
+                if tab:
+                    await tab._refresh_data()
+            
+            # Получаем список всех id статусов перекраса
+            repaint_ids = [status['id'] for status in data['repaint_statuses']]
+            
+            # Добавляем автомобиль со всеми статусами перекраса
+            async with self.db.pool.acquire() as conn:
+                await conn.execute(
+                    'CALL add_car_with_repaint($1, $2, $3, $4, $5, $6, $7)',
+                    data['plate_number'],
+                    data['user_id'],
+                    data['model_id'],
+                    data['year'],
+                    data['color_id'],
+                    data['wrap_id'],
+                    repaint_ids  # Передаем только массив id статусов
+                )
+            
+            # Обновляем все связанные таблицы после добавления
+            for tab in [colors_tab, wraps_tab, repaints_tab, repaint_links_tab]:
+                if tab:
+                    await tab._refresh_data()
+            await self._refresh_data()
+            
+            return {'success': True}
+        except Exception as e:
+            print(f"Error in _add_car_with_refresh: {str(e)}")
+            return {'error': str(e)}
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -1121,7 +1179,7 @@ class MainWindow(QMainWindow):
             'Boxes': TableTab(self.db, 'boxes', ['ID', 'Type', 'Capacity']),
             'Services': TableTab(self.db, 'services', ['ID', 'Name', 'Duration']),
             'Users': TableTab(self.db, 'users', ['ID', 'Username', 'Phone']),
-            'Cars': TableTab(self.db, 'cars', ['Plate', 'User ID', 'Model ID', 'Year', 'Color ID', 'Wrap ID', 'Repaint ID']),
+            'Cars': TableTab(self.db, 'cars', ['Plate', 'User ID', 'Model ID', 'Year', 'Color ID', 'Wrap ID']),
             'Bookings': TableTab(self.db, 'bookings', ['ID', 'Box ID', 'User ID', 'Plate', 'Date', 'Status ID']),
             'Book Services': TableTab(self.db, 'book_services', ['Booking ID', 'Service ID'])
         }

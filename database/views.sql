@@ -19,7 +19,7 @@ SELECT
 FROM car_models m
 JOIN car_brands b ON m.brand_id = b.id;
 
--- Full car information view
+-- Full car information view (обновляем)
 CREATE OR REPLACE VIEW car_full_info AS
 SELECT 
     c.plate_number,
@@ -30,14 +30,16 @@ SELECT
     c.year,
     cc.color,
     cw.status as wrap_status,
-    cr.status as repaint_status
+    array_agg(cr.status) as repaint_statuses  -- Получаем все статусы перекраса как массив
 FROM cars c
 JOIN users u ON c.user_id = u.id
 JOIN car_models cm ON c.model_id = cm.id
 JOIN car_brands cb ON cm.brand_id = cb.id
 JOIN car_colors cc ON c.color_id = cc.id
 JOIN car_wraps cw ON c.wrap_id = cw.id
-JOIN car_repaints cr ON c.repaint_id = cr.id;
+LEFT JOIN car_repaint_links crl ON c.plate_number = crl.car_id  -- Присоединяем связи
+LEFT JOIN car_repaints cr ON crl.repaint_id = cr.id  -- Присоединяем статусы
+GROUP BY c.plate_number, u.username, u.phone_number, cb.brand, cm.model, c.year, cc.color, cw.status;
 
 -- Active bookings view
 CREATE OR REPLACE VIEW active_bookings AS
