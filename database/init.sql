@@ -109,7 +109,7 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'validated_duration') THEN
         CREATE DOMAIN validated_duration AS service_duration
             CONSTRAINT valid_duration_value CHECK (
-                (((VALUE).unit = 'minutes' AND (VALUE).value BETWEEN 15 AND 480)) OR
+                (((VALUE).unit = 'hours' AND (VALUE).value BETWEEN 15 AND 480)) OR
                 ((VALUE).unit = 'days' AND (VALUE).value BETWEEN 1 AND 30)
             );
     END IF;

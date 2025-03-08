@@ -363,7 +363,7 @@ class ServiceInputDialog(QDialog):
         self.name_edit = QLineEdit()
         self.duration_spin = QSpinBox()
         self.unit_combo = QComboBox()
-        self.unit_combo.addItems(['минуты', 'дни'])
+        self.unit_combo.addItems(['часы', 'дни'])
         
         # Настраиваем спиннер в зависимости от единицы измерения
         self.unit_combo.currentTextChanged.connect(self._on_unit_changed)
@@ -390,19 +390,19 @@ class ServiceInputDialog(QDialog):
         layout.addLayout(btn_layout)
         
         # Устанавливаем начальные значения
-        self._on_unit_changed('минуты')
+        self._on_unit_changed('часы')
         
         # Заполняем данные если это редактирование
         if service_data:
             self.name_edit.setText(service_data['name'])
             duration = service_data['duration']
             self.duration_spin.setValue(duration[0])  # value
-            self.unit_combo.setCurrentText('минуты' if duration[1] == 'minutes' else 'дни')
+            self.unit_combo.setCurrentText('часы' if duration[1] == 'minutes' else 'дни')
 
     def _on_unit_changed(self, unit):
-        if unit == 'минуты':
-            self.duration_spin.setRange(15, 480)
-            self.duration_spin.setSingleStep(15)
+        if unit == 'часы':
+            self.duration_spin.setRange(1, 8)
+            self.duration_spin.setSingleStep(1)
         else:  # дни
             self.duration_spin.setRange(1, 30)
             self.duration_spin.setSingleStep(1)
@@ -411,7 +411,7 @@ class ServiceInputDialog(QDialog):
         return {
             'name': self.name_edit.text().strip(),
             'duration_value': self.duration_spin.value(),
-            'duration_unit': 'minutes' if self.unit_combo.currentText() == 'минуты' else 'days'
+            'duration_unit': 'minutes' if self.unit_combo.currentText() == 'часы' else 'days'
         }
 
 class CarModelDialog(QDialog):
